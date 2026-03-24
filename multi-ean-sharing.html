@@ -17,7 +17,6 @@
     <div class="bg-shape bg-shape-b"></div>
 
     <main class="app-shell">
-      <div id="chartTooltip" class="chart-tooltip" hidden></div>
       <header class="hero">
         <p class="kicker">EDC CSV TOOL</p>
         <h1>Zobrazení sdílení pro více výrobních EAN</h1>
@@ -90,9 +89,9 @@
       </section>
 
       <section class="card" id="sharingSection" hidden>
-        <h2>Přehled za výrobny: výroba, sdílení, zůstatek a ušlá příležitost</h2>
+        <h2>Přehled za výrobny: sdílení a zůstatek po sdílení</h2>
         <p id="optProgress" class="status"></p>
-        <canvas id="producerChart" width="1100" height="330"></canvas>
+        <div id="producerChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 
       <section class="card" id="producerPieChartsSection" hidden>
@@ -116,7 +115,7 @@
             Zobrazit spotřebu
           </label>
         </div>
-        <canvas id="bestDayChart" width="1100" height="320"></canvas>
+        <div id="bestDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 
       <section class="card" id="averageDaySection" hidden>
@@ -128,10 +127,11 @@
             Zobrazit spotřebu
           </label>
         </div>
-        <canvas id="averageDayChart" width="1100" height="320"></canvas>
+        <div id="averageDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
     </main>
 
+    <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
 </html>

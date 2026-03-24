@@ -100,20 +100,21 @@
         <div class="charts-grid">
           <article>
             <h3>Sdílení podle odběrných EAN</h3>
-            <canvas id="consumerChart" width="640" height="300"></canvas>
+            <div id="consumerChart" class="chart-canvas chart-canvas-sm"></div>
           </article>
           <article>
             <h3>Příspěvek výrobních EAN</h3>
-            <canvas id="producerChart" width="640" height="300"></canvas>
+            <div id="producerChart" class="chart-canvas chart-canvas-sm"></div>
           </article>
           <article class="chart-wide">
             <h3>Intervalový průběh (výroba/spotřeba/sdílení)</h3>
-            <canvas id="timelineChart" width="1100" height="320"></canvas>
+            <div id="timelineChart" class="chart-canvas chart-canvas-wide"></div>
           </article>
         </div>
       </section>
     </main>
 
+    <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
 </html>

@@ -89,6 +89,98 @@ let gProducerSearch = "";
 let gConsumerSearch = "";
 let gProducerSort = { key: "shared", direction: "desc" };
 let gConsumerSort = { key: "shared", direction: "desc" };
+const gChartInstances = new WeakMap();
+const gChartSet = new Set();
+let gGlobalResizeBound = false;
+const ECHART_THEME = {
+  textColor: "#20301e",
+  axisColor: "#ced8c9",
+  splitLine: "#dce5d8",
+  softSplitLine: "#eef3ea",
+  tooltipBg: "rgba(31, 42, 29, 0.95)",
+  tooltipBorder: "rgba(159, 230, 211, 0.25)",
+  palette: ["#10b981", "#2563eb", "#f59e0b", "#ef4444", "#7c3aed", "#0891b2"],
+};
+
+function getEcharts() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.echarts || null;
+}
+
+function ensureEchartsResizeBinding() {
+  if (gGlobalResizeBound) {
+    return;
+  }
+
+  window.addEventListener("resize", () => {
+    for (const chart of gChartSet) {
+      if (!chart.isDisposed()) {
+        chart.resize();
+      }
+    }
+  });
+  gGlobalResizeBound = true;
+}
+
+function destroyChartForElement(element) {
+  const echarts = getEcharts();
+  if (!echarts || !element) {
+    return;
+  }
+
+  const existing = gChartInstances.get(element) || echarts.getInstanceByDom(element);
+  if (existing) {
+    gChartSet.delete(existing);
+    existing.dispose();
+    gChartInstances.delete(element);
+  }
+}
+
+function createChartForCanvas(canvas, option) {
+  const echarts = getEcharts();
+  if (!echarts || !canvas) {
+    return null;
+  }
+
+  destroyChartForElement(canvas);
+
+  const chart = echarts.init(canvas, null, {
+    renderer: "canvas",
+    useDirtyRect: true,
+  });
+  chart.setOption(option, true);
+  ensureEchartsResizeBinding();
+  gChartInstances.set(canvas, chart);
+  gChartSet.add(chart);
+  return chart;
+}
+
+function buildEchartTooltip() {
+  return {
+    trigger: "axis",
+    backgroundColor: ECHART_THEME.tooltipBg,
+    borderColor: ECHART_THEME.tooltipBorder,
+    textStyle: {
+      color: "#ffffff",
+      fontFamily: "Space Grotesk, sans-serif",
+    },
+  };
+}
+
+function withEchartTheme(option) {
+  return {
+    animationDuration: 450,
+    animationEasing: "cubicOut",
+    color: ECHART_THEME.palette,
+    textStyle: {
+      fontFamily: "Space Grotesk, sans-serif",
+      color: ECHART_THEME.textColor,
+    },
+    ...option,
+  };
+}
 
 function parseSemicolonCsvLine(line) {
   const out = [];
@@ -999,422 +1091,215 @@ function renderProducerConsumerMatrix(data, result) {
 }
 
 function drawBarChart(canvas, labels, values, color) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
+  const chart = createChartForCanvas(canvas, withEchartTheme({
+    animationDuration: 450,
+    color: [color],
+    grid: {
+      left: 52,
+      right: 24,
+      top: 24,
+      bottom: 70,
+    },
+    tooltip: {
+      ...buildEchartTooltip(),
+      trigger: "item",
+      formatter: (params) => `${params.name}<br/>${Number(params.value).toFixed(2)} kWh`,
+    },
+    xAxis: {
+      type: "category",
+      data: labels,
+      axisLabel: {
+        interval: 0,
+        rotate: 35,
+        color: "#20301e",
+        formatter: (value) => (value.length > 24 ? `${value.slice(0, 24)}...` : value),
+      },
+      axisLine: { lineStyle: { color: "#ced8c9" } },
+    },
+    yAxis: {
+      type: "value",
+      name: "kWh",
+      nameTextStyle: { color: "#4f5f4c" },
+      axisLabel: { color: "#4f5f4c" },
+      splitLine: { lineStyle: { color: "#dce5d8" } },
+    },
+    series: [
+      {
+        type: "bar",
+        data: values,
+        barMaxWidth: 36,
+        itemStyle: {
+          borderRadius: [6, 6, 0, 0],
+          shadowBlur: 8,
+          shadowColor: "rgba(20, 40, 28, 0.12)",
+        },
+      },
+    ],
+  }));
+
+  if (!chart) {
     return;
-  }
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const pad = { l: 42, r: 10, t: 14, b: 50 };
-  const chartW = w - pad.l - pad.r;
-  const chartH = h - pad.t - pad.b;
-  const maxVal = Math.max(...values, 1);
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#1f2a1d";
-  ctx.font = "12px Space Grotesk";
-
-  ctx.strokeStyle = "#dce5d8";
-  for (let i = 0; i <= 4; i += 1) {
-    const y = pad.t + (chartH * i) / 4;
-    ctx.beginPath();
-    ctx.moveTo(pad.l, y);
-    ctx.lineTo(w - pad.r, y);
-    ctx.stroke();
-    const v = maxVal * (1 - i / 4);
-    ctx.fillText(v.toFixed(1), 4, y + 4);
-  }
-
-  const barW = chartW / values.length;
-  for (let i = 0; i < values.length; i += 1) {
-    const barH = (values[i] / maxVal) * chartH;
-    const x = pad.l + i * barW + 4;
-    const y = pad.t + chartH - barH;
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, Math.max(6, barW - 8), barH);
-
-    ctx.save();
-    ctx.translate(x + Math.max(6, barW - 8) / 2, h - 6);
-    ctx.rotate(-Math.PI / 4);
-    ctx.fillStyle = "#263024";
-    const shortLabel = labels[i].length > 16 ? `${labels[i].slice(0, 15)}...` : labels[i];
-    ctx.fillText(shortLabel, 0, 0);
-    ctx.restore();
   }
 }
 
 function drawProducerOverviewChart(canvas, producerStats, tooltip) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return;
-  }
-
   const labels = producerStats.map((p) => displayEan(p.name));
   const production = producerStats.map((p) => Math.max(0, p.before));
   const shared = producerStats.map((p) => Math.max(0, p.before - p.after));
   const missed = producerStats.map((p) => Math.max(0, p.missed));
-  const remainder = producerStats.map((p) => Math.max(0, p.after - p.missed));
+  const remainderAfterSharing = producerStats.map((p) => Math.max(0, p.after));
 
-  const w = canvas.width;
-  const h = canvas.height;
-  const pad = { l: 50, r: 12, t: 60, b: 48 };
-  const chartW = w - pad.l - pad.r;
-  const chartH = h - pad.t - pad.b;
-  const maxVal = Math.max(...production, 1);
-
-  // Store bar rectangles for hover detection
-  canvas.barRects = [];
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#1f2a1d";
-  ctx.font = "13px Space Grotesk";
-
-  // Grid lines with subtle styling
-  ctx.strokeStyle = "rgba(220, 229, 216, 0.5)";
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i += 1) {
-    const y = pad.t + (chartH * i) / 4;
-    ctx.beginPath();
-    ctx.moveTo(pad.l, y);
-    ctx.lineTo(w - pad.r, y);
-    ctx.stroke();
-    const v = maxVal * (1 - i / 4);
-    ctx.fillText(v.toFixed(1), 4, y + 5);
-  }
-
-  const stackSeries = [
-    { values: shared, color: "#10b981", label: "Sdílení" },
-    { values: missed, color: "#ef4444", label: "Ušlá příležitost" },
-    { values: remainder, color: "#f59e0b", label: "Zůstatek" },
-  ];
-
-  const groupW = chartW / Math.max(1, labels.length);
-  const barW = Math.max(20, Math.min(80, groupW - 8));
-
-  for (let i = 0; i < labels.length; i += 1) {
-    const x = pad.l + i * groupW + (groupW - barW) / 2;
-    let currentTop = pad.t + chartH;
-    const smallSegments = [];
-    const barRectSegments = [];
-
-    for (let s = 0; s < stackSeries.length; s += 1) {
-      const val = stackSeries[s].values[i];
-      const barH = (val / maxVal) * chartH;
-      const y = currentTop - barH;
-      
-      // Create gradient
-      const gradient = ctx.createLinearGradient(x, y, x, currentTop);
-      const colors = [
-        { color: stackSeries[s].color, opacity: 1 },
-        { color: stackSeries[s].color, opacity: 0.7 }
-      ];
-      gradient.addColorStop(0, colors[0].color);
-      gradient.addColorStop(1, colors[1].color);
-      
-      // Draw shadow
-      ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
-      ctx.fillRect(x + 2, y + 2, barW, barH);
-      
-      // Draw bar with gradient
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x, y, barW, barH);
-      
-      // Draw border
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x, y, barW, barH);
-
-      barRectSegments.push({
-        x, y, w: barW, h: barH,
-        label: stackSeries[s].label,
-        value: val,
-        percent: ((val / production[i]) * 100).toFixed(1)
-      });
-
-      // Add percentage text
-      const pct = ((val / production[i]) * 100).toFixed(0);
-      ctx.font = "bold 12px Space Grotesk";
-      
-      if (barH > 22) {
-        ctx.fillStyle = "#ffffff";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`${pct}%`, x + barW / 2, y + barH / 2);
-        ctx.textBaseline = "alphabetic";
-      } else if (barH > 0) {
-        smallSegments.push({ y: y + barH / 2, pct });
-      }
-      ctx.textAlign = "left";
-
-      currentTop = y;
-    }
-
-    // Draw text for small segments
-    const lineHeight = 15;
-    smallSegments.sort((a, b) => a.y - b.y);
-    let lastY = -Infinity;
-    for (const seg of smallSegments) {
-      let textY = Math.max(seg.y, lastY + lineHeight);
-      ctx.fillStyle = "#20301e";
-      ctx.font = "bold 12px Space Grotesk";
-      ctx.textAlign = "left";
-      ctx.fillText(`${seg.pct}%`, x + barW + 12, textY);
-      lastY = textY;
-    }
-
-    // Store bar info for hover detection
-    canvas.barRects.push({
-      x, y: pad.t + chartH - (production[i] / maxVal) * chartH,
-      w: barW, h: (production[i] / maxVal) * chartH,
-      producerName: producerStats[i].name,
-      producerLabel: labels[i],
-      production: production[i],
-      shared: shared[i],
-      missed: missed[i],
-      remainder: remainder[i],
-      segments: barRectSegments
-    });
-
-    // Blue outline marks total production
-    const totalH = (production[i] / maxVal) * chartH;
-    const totalY = pad.t + chartH - totalH;
-    ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 2.5;
-    ctx.strokeRect(x - 1, totalY - 1, barW + 2, totalH + 2);
-
-    // Show total production value
-    ctx.fillStyle = "#1f2a1d";
-    ctx.font = "bold 11px Space Grotesk";
-    ctx.textAlign = "center";
-    ctx.fillText(production[i].toFixed(1), x + barW / 2, Math.max(pad.t - 3, totalY - 5));
-    ctx.textAlign = "left";
-
-    // Producer name label
-    const maxLabelWidth = groupW - 4;
-    ctx.font = "bold 11px Space Grotesk";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#1f2a1d";
-    const labelWords = labels[i].split(" ");
-    let curLine = "";
-    const lines = [];
-    for (const word of labelWords) {
-      const testLine = curLine ? `${curLine} ${word}` : word;
-      if (ctx.measureText(testLine).width <= maxLabelWidth - 4) {
-        curLine = testLine;
-      } else {
-        if (curLine) lines.push(curLine);
-        curLine = word;
-      }
-    }
-    if (curLine) lines.push(curLine);
-
-    const lineH = 13;
-    const maxLines = Math.min(lines.length, 4);
-    for (let l = 0; l < maxLines; l += 1) {
-      ctx.fillText(lines[l], x + barW / 2, 12 + l * lineH);
-    }
-    ctx.textAlign = "left";
-  }
-
-  // Legend – modernní design
-  const legendItems = [
-    { color: "#3b82f6", label: "Výroba (celkem)" },
-    { color: "#10b981", label: "Sdílení" },
-    { color: "#ef4444", label: "Ušlá příležitost" },
-    { color: "#f59e0b", label: "Zůstatek" },
-  ];
-  ctx.font = "11px Space Grotesk";
-  let totalLegendWidth = 0;
-  for (const item of legendItems) {
-    totalLegendWidth += 16 + ctx.measureText(item.label).width + 20;
-  }
-  let legendX = (w - totalLegendWidth) / 2;
-  const legendY = h - 14;
-  for (const item of legendItems) {
-    ctx.fillStyle = item.color;
-    ctx.beginPath();
-    ctx.arc(legendX + 6, legendY - 6, 6, 0, Math.PI * 2);
-    ctx.fill();
-    legendX += 16;
-    ctx.fillStyle = "#20301e";
-    ctx.fillText(item.label, legendX, legendY);
-    legendX += ctx.measureText(item.label).width + 20;
-  }
-
-  // Add mousemove handler if tooltip provided
-  if (tooltip) {
-    canvas.onmousemove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      
-      let found = false;
-      for (const bar of canvas.barRects) {
-        if (mouseX >= bar.x && mouseX <= bar.x + bar.w &&
-            mouseY >= bar.y && mouseY <= bar.y + bar.h) {
-          found = true;
-          
-          // Check which segment we're in
-          let segmentInfo = { label: "", value: "0" };
-          let currentY = bar.y;
-          for (const segment of bar.segments) {
-            if (mouseY >= currentY && mouseY < currentY + segment.h) {
-              segmentInfo = segment;
-              break;
-            }
-            currentY += segment.h;
-          }
-          
-          const tooltipHtml = `
-            <strong>${bar.producerLabel}</strong><br/>
-            ${segmentInfo.label}: <strong>${segmentInfo.value} kWh</strong> (${segmentInfo.percent}%)
-          `;
-          
-          tooltip.innerHTML = tooltipHtml;
-          tooltip.style.left = (e.clientX + 12) + "px";
-          tooltip.style.top = (e.clientY - 8) + "px";
-          tooltip.removeAttribute("hidden");
-          break;
+  createChartForCanvas(canvas, withEchartTheme({
+    animationDuration: 500,
+    color: ["#10b981", "#f59e0b"],
+    legend: {
+      bottom: 6,
+      textStyle: {
+        color: "#20301e",
+        fontFamily: "Space Grotesk, sans-serif",
+      },
+    },
+    tooltip: {
+      ...buildEchartTooltip(),
+      trigger: "axis",
+      axisPointer: { type: "shadow" },
+      formatter: (params) => {
+        if (!params.length) return "";
+        const idx = params[0].dataIndex;
+        const prod = production[idx] || 0;
+        const lines = [
+          `<strong>${labels[idx]}</strong>`,
+          `Výroba (celkem): ${prod.toFixed(1)} kWh`,
+        ];
+        lines.push(`Ušlá příležitost: ${missed[idx].toFixed(1)} kWh`);
+        for (const item of params) {
+          const pct = prod > 0 ? ((Number(item.value) / prod) * 100).toFixed(1) : "0.0";
+          lines.push(`${item.marker} ${item.seriesName}: ${Number(item.value).toFixed(1)} kWh (${pct}%)`);
         }
-      }
-      
-      if (!found) {
-        tooltip.setAttribute("hidden", "");
-      }
-    };
-    
-    canvas.onmouseleave = () => {
-      tooltip.setAttribute("hidden", "");
-    };
-  }
+        return lines.join("<br/>");
+      },
+    },
+    grid: {
+      left: 58,
+      right: 30,
+      top: 36,
+      bottom: 92,
+    },
+    xAxis: {
+      type: "category",
+      data: labels,
+      axisLabel: {
+        interval: 0,
+        rotate: 28,
+        color: "#20301e",
+        formatter: (value) => (value.length > 22 ? `${value.slice(0, 22)}...` : value),
+      },
+      axisLine: { lineStyle: { color: "#ced8c9" } },
+    },
+    yAxis: {
+      type: "value",
+      name: "kWh",
+      axisLabel: { color: "#4f5f4c" },
+      splitLine: { lineStyle: { color: "#dce5d8" } },
+    },
+    series: [
+      {
+        name: "Sdílení",
+        type: "bar",
+        stack: "allocation",
+        data: shared,
+        barMaxWidth: 46,
+        itemStyle: { borderRadius: [0, 0, 6, 6] },
+      },
+      {
+        name: "Zůstatek po sdílení",
+        type: "bar",
+        stack: "allocation",
+        data: remainderAfterSharing,
+        itemStyle: { borderRadius: [6, 6, 0, 0] },
+      },
+    ],
+  }));
 }
 
 function drawTimelineChart(canvas, points, tooltip) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return;
-  }
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const pad = { l: 46, r: 12, t: 16, b: 52 };
-  const chartW = w - pad.l - pad.r;
-  const chartH = h - pad.t - pad.b;
-  const maxVal = Math.max(
-    ...points.map((p) => p.production),
-    ...points.map((p) => p.consumption),
-    ...points.map((p) => p.shared),
-    1,
-  );
-
-  ctx.clearRect(0, 0, w, h);
-
-  const bgGrad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
-  bgGrad.addColorStop(0, "#f9fcf7");
-  bgGrad.addColorStop(1, "#eef5eb");
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(pad.l, pad.t, chartW, chartH);
-
-  ctx.strokeStyle = "#dce5d8";
-  for (let i = 0; i <= 4; i += 1) {
-    const y = pad.t + (chartH * i) / 4;
-    ctx.beginPath();
-    ctx.moveTo(pad.l, y);
-    ctx.lineTo(w - pad.r, y);
-    ctx.stroke();
-  }
-
-  const pointMeta = [];
-  const drawSeries = (key, color, label) => {
-    ctx.beginPath();
-    ctx.lineWidth = 2.4;
-    ctx.strokeStyle = color;
-    for (let i = 0; i < points.length; i += 1) {
-      const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
-      const y = pad.t + chartH - (points[i][key] / maxVal) * chartH;
-      if (i === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
-
-      pointMeta.push({
-        x,
-        y,
-        r: 5,
-        key,
-        seriesLabel: label,
-        timeLabel: points[i].label,
-        value: points[i][key],
-      });
-    }
-    ctx.stroke();
-
-    for (let i = 0; i < points.length; i += 1) {
-      const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
-      const y = pad.t + chartH - (points[i][key] / maxVal) * chartH;
-      ctx.beginPath();
-      ctx.fillStyle = "#ffffff";
-      ctx.arc(x, y, 3.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.fillStyle = color;
-      ctx.arc(x, y, 2.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  };
-
-  drawSeries("production", "#2563eb", "Výroba");
-  drawSeries("consumption", "#f59e0b", "Spotřeba");
-  drawSeries("shared", "#10b981", "Sdílení");
-
-  if (tooltip) {
-    canvas.onmousemove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = ((e.clientX - rect.left) * canvas.width) / rect.width;
-      const mouseY = ((e.clientY - rect.top) * canvas.height) / rect.height;
-
-      let hovered = null;
-      for (const pt of pointMeta) {
-        const dx = mouseX - pt.x;
-        const dy = mouseY - pt.y;
-        if ((dx * dx) + (dy * dy) <= pt.r * pt.r * 2.2) {
-          hovered = pt;
-          break;
+  createChartForCanvas(canvas, withEchartTheme({
+    animationDuration: 450,
+    tooltip: {
+      ...buildEchartTooltip(),
+      trigger: "axis",
+      formatter: (params) => {
+        if (!params.length) return "";
+        const lines = [`<strong>${params[0].axisValueLabel}</strong>`];
+        for (const p of params) {
+          lines.push(`${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(2)} kWh`);
         }
-      }
-
-      if (hovered) {
-        tooltip.innerHTML = `<strong>${hovered.seriesLabel}</strong><br/>${hovered.timeLabel}<br/>${hovered.value.toFixed(2)} kWh`;
-        tooltip.style.left = `${e.clientX + 14}px`;
-        tooltip.style.top = `${e.clientY + 14}px`;
-        tooltip.removeAttribute("hidden");
-      } else {
-        tooltip.setAttribute("hidden", "");
-      }
-    };
-
-    canvas.onmouseleave = () => {
-      tooltip.setAttribute("hidden", "");
-    };
-  }
-
-  ctx.fillStyle = "#20301e";
-  ctx.font = "12px Space Grotesk";
-  ctx.fillText("modrá: výroba", 8, h - 30);
-  ctx.fillText("oranžová: spotřeba", 150, h - 30);
-  ctx.fillText("zelená: sdíleno", 320, h - 30);
-
-  const skip = Math.ceil(points.length / 12);
-  for (let i = 0; i < points.length; i += skip) {
-    const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
-    ctx.save();
-    ctx.translate(x, h - 5);
-    ctx.rotate(-Math.PI / 4);
-    ctx.fillText(points[i].label.slice(5, 16), 0, 0);
-    ctx.restore();
-  }
+        return lines.join("<br/>");
+      },
+    },
+    legend: {
+      bottom: 6,
+      textStyle: { color: "#20301e", fontFamily: "Space Grotesk, sans-serif" },
+    },
+    grid: {
+      left: 58,
+      right: 24,
+      top: 24,
+      bottom: 78,
+    },
+    xAxis: {
+      type: "category",
+      data: points.map((p) => p.label),
+      axisLabel: {
+        color: "#20301e",
+        rotate: 40,
+        formatter: (value) => (value.length > 16 ? `${value.slice(0, 16)}...` : value),
+      },
+      splitLine: { show: false },
+      axisLine: { lineStyle: { color: "#ced8c9" } },
+    },
+    yAxis: {
+      type: "value",
+      axisLabel: {
+        color: "#4f5f4c",
+        formatter: (value) => `${Number(value).toFixed(1)} kWh`,
+      },
+      splitLine: { lineStyle: { color: "#dce5d8" } },
+    },
+    series: [
+      {
+        name: "Výroba",
+        type: "line",
+        data: points.map((p) => p.production),
+        smooth: 0.25,
+        showSymbol: points.length <= 120,
+        symbolSize: 5,
+        lineStyle: { width: 2.5, color: "#2563eb" },
+        itemStyle: { color: "#2563eb" },
+      },
+      {
+        name: "Spotřeba",
+        type: "line",
+        data: points.map((p) => p.consumption),
+        smooth: 0.25,
+        showSymbol: points.length <= 120,
+        symbolSize: 5,
+        lineStyle: { width: 2.5, color: "#f59e0b" },
+        itemStyle: { color: "#f59e0b" },
+      },
+      {
+        name: "Sdílení",
+        type: "line",
+        data: points.map((p) => p.shared),
+        smooth: 0.25,
+        showSymbol: points.length <= 120,
+        symbolSize: 5,
+        lineStyle: { width: 2.8, color: "#10b981" },
+        itemStyle: { color: "#10b981" },
+        areaStyle: { color: "rgba(16, 185, 129, 0.16)" },
+      },
+    ],
+  }));
 }
 
 function renderCharts(data, result) {
@@ -1432,146 +1317,65 @@ function renderCharts(data, result) {
     "#2563eb",
   );
 
-  const tooltip = document.getElementById("chartTooltip");
-  drawTimelineChart(dom.timelineChart, result.intervalTotals, tooltip);
+  drawTimelineChart(dom.timelineChart, result.intervalTotals, null);
 }
 
 function drawPieChart(canvas, values, colors, labels, tooltip) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const centerX = w / 2;
-  const centerY = h / 2;
-  const radius = Math.min(w, h) / 2 - 12;
-
   const total = values.reduce((a, b) => a + b, 0);
-  if (total === 0) return;
-  // Store slice info for hover detection
-  canvas.slices = [];
+  const seriesData = values.map((value, i) => ({
+    value,
+    name: labels[i],
+    itemStyle: { color: colors[i] },
+  }));
 
-
-  let currentAngle = -Math.PI / 2;
-  
-  for (let i = 0; i < values.length; i += 1) {
-    const sliceAngle = (values[i] / total) * 2 * Math.PI;
-    
-    const midAngle = currentAngle + sliceAngle / 2;
-    
-    // Store slice info for hover detection
-    canvas.slices.push({
-      startAngle: currentAngle,
-      endAngle: currentAngle + sliceAngle,
-      midAngle: midAngle,
-      radius: radius,
-      centerX: centerX,
-      centerY: centerY,
-      label: labels ? labels[i] : `${((values[i] / total) * 100).toFixed(0)}%`,
-      value: values[i],
-      color: colors[i],
-      pct: ((values[i] / total) * 100).toFixed(1)
-    });
-
-    // Draw shadow
-    ctx.fillStyle = "rgba(0, 0, 0, 0.08)";
-    ctx.beginPath();
-    ctx.moveTo(centerX + 2, centerY + 2);
-    ctx.arc(centerX + 2, centerY + 2, radius, currentAngle, currentAngle + sliceAngle);
-    ctx.lineTo(centerX + 2, centerY + 2);
-    ctx.fill();
-    
-    // Draw pie slice with gradient
-    const gradient = ctx.createLinearGradient(centerX, centerY - radius, centerX, centerY + radius);
-    gradient.addColorStop(0, colors[i]);
-    gradient.addColorStop(1, `${colors[i]}dd`);
-    
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + sliceAngle);
-    ctx.lineTo(centerX, centerY);
-    ctx.fill();
-    
-    // Draw border
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Draw percentage label
-    const labelDist = radius * 0.65;
-    const labelX = centerX + Math.cos(midAngle) * labelDist;
-    const labelY = centerY + Math.sin(midAngle) * labelDist;
-    
-    const pct = ((values[i] / total) * 100).toFixed(0);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 12px Space Grotesk";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    
-    if (pct > 5) {
-      ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
-      ctx.shadowBlur = 3;
-      ctx.fillText(`${pct}%`, labelX, labelY);
-      ctx.shadowColor = "transparent";
-    }
-
-    currentAngle += sliceAngle;
-  }
-
-  // Add mousemove handler if tooltip provided
-  if (tooltip) {
-    canvas.onmousemove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left - centerX;
-      const mouseY = e.clientY - rect.top - centerY;
-      const distance = Math.sqrt(mouseX * mouseX + mouseY * mouseY);
-      const angle = Math.atan2(mouseY, mouseX);
-      
-      let found = false;
-      for (const slice of canvas.slices) {
-        const startAngle = slice.startAngle;
-        const endAngle = slice.endAngle;
-        let normalizedAngle = angle;
-        
-        // Normalize angle to match canvas coordinate system
-        while (normalizedAngle < startAngle) normalizedAngle += Math.PI * 2;
-        while (normalizedAngle >= startAngle + Math.PI * 2) normalizedAngle -= Math.PI * 2;
-        
-        if (distance <= radius && normalizedAngle >= startAngle && normalizedAngle <= endAngle) {
-          found = true;
-          
-          const tooltipHtml = `
-            <strong>${slice.label}</strong><br/>
-            ${slice.value.toFixed(1)} kWh (${slice.pct}%)
-          `;
-          
-          tooltip.innerHTML = tooltipHtml;
-          tooltip.style.left = (e.clientX + 12) + "px";
-          tooltip.style.top = (e.clientY - 8) + "px";
-          tooltip.removeAttribute("hidden");
-          break;
-        }
-      }
-      
-      if (!found) {
-        tooltip.setAttribute("hidden", "");
-      }
-    };
-    
-
-    canvas.onmouseleave = () => {
-      tooltip.setAttribute("hidden", "");
-    };
-  }
+  createChartForCanvas(canvas, withEchartTheme({
+    animationDuration: 500,
+    color: colors,
+    tooltip: {
+      ...buildEchartTooltip(),
+      trigger: "item",
+      formatter: (params) => {
+        const pct = total > 0 ? ((Number(params.value) / total) * 100).toFixed(1) : "0.0";
+        return `<strong>${params.name}</strong><br/>${Number(params.value).toFixed(1)} kWh (${pct}%)`;
+      },
+    },
+    series: [
+      {
+        type: "pie",
+        radius: "78%",
+        center: ["50%", "52%"],
+        avoidLabelOverlap: true,
+        itemStyle: {
+          borderColor: "#ffffff",
+          borderWidth: 2,
+          shadowBlur: 12,
+          shadowColor: "rgba(20, 40, 28, 0.16)",
+        },
+        label: {
+          show: false,
+        },
+        labelLine: {
+          show: false,
+        },
+        emphasis: {
+          scale: true,
+          scaleSize: 6,
+          label: {
+            show: false,
+          },
+        },
+        data: seriesData,
+      },
+    ],
+  }));
 }
 function renderProducerPieCharts(producerStats) {
   const container = document.getElementById("producerPieCharts");
   const section = document.getElementById("producerPieChartsSection");
-  const tooltip = document.getElementById("chartTooltip");
   
   if (!container || !section) return;
+
+  section.hidden = false;
   
   container.innerHTML = "";
   
@@ -1595,9 +1399,8 @@ function renderProducerPieCharts(producerStats) {
     h3.textContent = displayEan(producer.name);
     wrapper.appendChild(h3);
     
-    const canvas = document.createElement("canvas");
-    canvas.width = 180;
-    canvas.height = 180;
+    const canvas = document.createElement("div");
+    canvas.className = "pie-chart-canvas";
     wrapper.appendChild(canvas);
     
     const statsDiv = document.createElement("div");
@@ -1611,10 +1414,9 @@ function renderProducerPieCharts(producerStats) {
     
     container.appendChild(wrapper);
     
-    drawPieChart(canvas, values, colors, labels, tooltip);
+    drawPieChart(canvas, values, colors, labels, null);
   }
   
-  section.hidden = false;
 }
 
 const CONSUMER_COLORS = [
@@ -1653,6 +1455,8 @@ function renderProducerConsumerPieCharts(data) {
   const section = document.getElementById("producerConsumerPieChartsSection");
   if (!container || !section) return;
 
+  section.hidden = false;
+
   container.innerHTML = "";
 
   const allocations = computeProducerConsumerAllocations(data);
@@ -1679,7 +1483,6 @@ function renderProducerConsumerPieCharts(data) {
     const values = mainItems.map((it) => it.shared);
     const colors = mainItems.map((it) => it.colorIndex >= 0 ? CONSUMER_COLORS[it.colorIndex % CONSUMER_COLORS.length] : "#9ca3af");
     const labels = mainItems.map((it) => it.name ? displayEan(it.name) : "Ostatní");
-    const tooltip = document.getElementById("chartTooltip");
 
     const wrapper = document.createElement("div");
     wrapper.className = "pie-chart-container";
@@ -1688,9 +1491,8 @@ function renderProducerConsumerPieCharts(data) {
     h3.textContent = displayEan(producer.name);
     wrapper.appendChild(h3);
 
-    const canvas = document.createElement("canvas");
-    canvas.width = 180;
-    canvas.height = 180;
+    const canvas = document.createElement("div");
+    canvas.className = "pie-chart-canvas";
     wrapper.appendChild(canvas);
 
     const statsDiv = document.createElement("div");
@@ -1702,10 +1504,8 @@ function renderProducerConsumerPieCharts(data) {
 
     container.appendChild(wrapper);
 
-    drawPieChart(canvas, values, colors, labels, tooltip);
+    drawPieChart(canvas, values, colors, labels, null);
   }
-
-  section.hidden = false;
 }
 
 function computeAverageDay(intervals) {
@@ -1741,146 +1541,90 @@ function computeAverageDay(intervals) {
 }
 
 function drawAverageDayChart(canvas, points, showConsumption, tooltip) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const pad = { l: 52, r: 180, t: 20, b: 50 };
-  const chartW = w - pad.l - pad.r;
-  const chartH = h - pad.t - pad.b;
-
-  const seriesForScale = [
-    ...points.map((p) => p.production),
-    ...points.map((p) => p.shared),
-    ...(showConsumption ? points.map((p) => p.consumption) : []),
+  const series = [
+    {
+      name: "Výroba",
+      type: "line",
+      data: points.map((p) => p.production),
+      smooth: 0.25,
+      showSymbol: points.length <= 120,
+      symbolSize: 5,
+      lineStyle: { width: 2.4, color: "#2563eb" },
+      itemStyle: { color: "#2563eb" },
+    },
   ];
-  const maxVal = Math.max(...seriesForScale, 1);
 
-  ctx.clearRect(0, 0, w, h);
-
-  // Grid lines + Y-axis labels
-  ctx.strokeStyle = "#dce5d8";
-  ctx.fillStyle = "#5f6d5c";
-  ctx.font = "11px Space Grotesk";
-  ctx.textAlign = "right";
-  for (let i = 0; i <= 4; i += 1) {
-    const y = pad.t + (chartH * i) / 4;
-    ctx.beginPath();
-    ctx.moveTo(pad.l, y);
-    ctx.lineTo(w - pad.r, y);
-    ctx.stroke();
-    const v = maxVal * (1 - i / 4);
-    ctx.fillText(v.toFixed(2), pad.l - 4, y + 4);
+  if (showConsumption) {
+    series.push({
+      name: "Spotřeba",
+      type: "line",
+      data: points.map((p) => p.consumption),
+      smooth: 0.25,
+      showSymbol: points.length <= 120,
+      symbolSize: 5,
+      lineStyle: { width: 2.4, color: "#f59e0b" },
+      itemStyle: { color: "#f59e0b" },
+    });
   }
-  ctx.textAlign = "left";
 
-  const pointMeta = [];
-  const drawSeries = (key, color, width, label) => {
-    ctx.beginPath();
-    ctx.lineWidth = width || 2;
-    ctx.strokeStyle = color;
-    for (let i = 0; i < points.length; i += 1) {
-      const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
-      const y = pad.t + chartH - (points[i][key] / maxVal) * chartH;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+  series.push({
+    name: "Sdílení",
+    type: "line",
+    data: points.map((p) => p.shared),
+    smooth: 0.25,
+    showSymbol: points.length <= 120,
+    symbolSize: 5,
+    lineStyle: { width: 2.8, color: "#10b981" },
+    itemStyle: { color: "#10b981" },
+    areaStyle: { color: "rgba(16, 185, 129, 0.14)" },
+  });
 
-      pointMeta.push({
-        x,
-        y,
-        r: 5,
-        key,
-        seriesLabel: label,
-        timeLabel: points[i].label,
-        value: points[i][key],
-      });
-    }
-    ctx.stroke();
-
-    for (let i = 0; i < points.length; i += 1) {
-      const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
-      const y = pad.t + chartH - (points[i][key] / maxVal) * chartH;
-      ctx.beginPath();
-      ctx.fillStyle = "#ffffff";
-      ctx.arc(x, y, 3.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.fillStyle = color;
-      ctx.arc(x, y, 2.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  };
-
-  drawSeries("production", "#2563eb", 2, "Výroba");
-  if (showConsumption) drawSeries("consumption", "#f59e0b", 2, "Spotřeba");
-  drawSeries("shared", "#10b981", 2.5, "Sdílení");
-
-  if (tooltip) {
-    canvas.onmousemove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = ((e.clientX - rect.left) * canvas.width) / rect.width;
-      const mouseY = ((e.clientY - rect.top) * canvas.height) / rect.height;
-
-      let hovered = null;
-      for (const pt of pointMeta) {
-        const dx = mouseX - pt.x;
-        const dy = mouseY - pt.y;
-        if ((dx * dx) + (dy * dy) <= pt.r * pt.r * 2.2) {
-          hovered = pt;
-          break;
+  createChartForCanvas(canvas, withEchartTheme({
+    animationDuration: 450,
+    tooltip: {
+      ...buildEchartTooltip(),
+      trigger: "axis",
+      formatter: (params) => {
+        if (!params.length) return "";
+        const lines = [`<strong>${params[0].axisValueLabel}</strong>`];
+        for (const p of params) {
+          lines.push(`${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(2)} kWh`);
         }
-      }
-
-      if (hovered) {
-        tooltip.innerHTML = `<strong>${hovered.seriesLabel}</strong><br/>${hovered.timeLabel}<br/>${hovered.value.toFixed(2)} kWh`;
-        tooltip.style.left = `${e.clientX + 14}px`;
-        tooltip.style.top = `${e.clientY + 14}px`;
-        tooltip.removeAttribute("hidden");
-      } else {
-        tooltip.setAttribute("hidden", "");
-      }
-    };
-
-    canvas.onmouseleave = () => {
-      tooltip.setAttribute("hidden", "");
-    };
-  }
-
-  // X-axis labels – show every full hour
-  ctx.fillStyle = "#263024";
-  ctx.font = "10px Space Grotesk";
-  ctx.textAlign = "center";
-  for (let i = 0; i < points.length; i += 1) {
-    if (points[i].label.endsWith(":00")) {
-      const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
-      ctx.fillText(points[i].label, x, pad.t + chartH + 14);
-      ctx.strokeStyle = "#e5e9e4";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, pad.t);
-      ctx.lineTo(x, pad.t + chartH);
-      ctx.stroke();
-    }
-  }
-  ctx.textAlign = "left";
-
-  // Legend on the right
-  const legendX = w - pad.r + 16;
-  const legendItems = [
-    { color: "#2563eb", label: "Výroba" },
-    ...(showConsumption ? [{ color: "#d97706", label: "Spotřeba" }] : []),
-    { color: "#0f766e", label: "Sdílení" },
-  ];
-  ctx.font = "12px Space Grotesk";
-  let legendY = pad.t + 10;
-  for (const item of legendItems) {
-    ctx.fillStyle = item.color;
-    ctx.fillRect(legendX, legendY, 12, 12);
-    ctx.fillStyle = "#20301e";
-    ctx.fillText(item.label, legendX + 18, legendY + 10);
-    legendY += 22;
-  }
+        return lines.join("<br/>");
+      },
+    },
+    legend: {
+      right: 10,
+      top: 14,
+      orient: "vertical",
+      textStyle: { color: "#20301e", fontFamily: "Space Grotesk, sans-serif" },
+    },
+    grid: {
+      left: 58,
+      right: 170,
+      top: 26,
+      bottom: 56,
+    },
+    xAxis: {
+      type: "category",
+      data: points.map((p) => p.label),
+      axisLabel: {
+        color: "#20301e",
+        interval: 3,
+      },
+      axisLine: { lineStyle: { color: "#ced8c9" } },
+      splitLine: { show: true, lineStyle: { color: "#eef3ea" } },
+    },
+    yAxis: {
+      type: "value",
+      axisLabel: {
+        color: "#4f5f4c",
+        formatter: (value) => Number(value).toFixed(2),
+      },
+      splitLine: { lineStyle: { color: "#dce5d8" } },
+    },
+    series,
+  }));
 }
 
 function computeBestDay(intervals) {
@@ -1937,12 +1681,13 @@ function renderBestDayChart(data) {
   const { date, points } = computeBestDay(data.intervals);
   if (!points.length) return;
 
+  section.hidden = false;
+
   if (title && date) title.textContent = `Nejlepší den – ${date}`;
 
   const redraw = () => {
     const showConsumption = toggle ? toggle.checked : true;
-    const tooltip = document.getElementById("chartTooltip");
-    drawAverageDayChart(canvas, points, showConsumption, tooltip);
+    drawAverageDayChart(canvas, points, showConsumption, null);
   };
 
   if (toggle) {
@@ -1952,7 +1697,6 @@ function renderBestDayChart(data) {
   }
 
   redraw();
-  section.hidden = false;
 }
 
 function renderAverageDayChart(data) {
@@ -1961,12 +1705,13 @@ function renderAverageDayChart(data) {
   const toggle = document.getElementById("avgDayShowConsumption");
   if (!canvas || !section) return;
 
+  section.hidden = false;
+
   const points = computeAverageDay(data.intervals);
 
   const redraw = () => {
     const showConsumption = toggle ? toggle.checked : true;
-    const tooltip = document.getElementById("chartTooltip");
-    drawAverageDayChart(canvas, points, showConsumption, tooltip);
+    drawAverageDayChart(canvas, points, showConsumption, null);
   };
 
   if (toggle) {
@@ -1976,7 +1721,6 @@ function renderAverageDayChart(data) {
   }
 
   redraw();
-  section.hidden = false;
 }
 
 function makeCsvRow(values) {
@@ -2085,8 +1829,7 @@ function onDataLoaded(data) {
 
   if (dom.producerChart) {
     if (pageMode === "sharing") {
-      const tooltip = document.getElementById("chartTooltip");
-      drawProducerOverviewChart(dom.producerChart, producerStats, tooltip);
+      drawProducerOverviewChart(dom.producerChart, producerStats, null);
       renderProducerPieCharts(producerStats);
       renderProducerConsumerPieCharts(data);
       renderBestDayChart(data);
@@ -2105,13 +1848,12 @@ function onDataLoaded(data) {
     drawBarChart(dom.consumerChart, ["čekám na simulaci"], [0], "#d1d5db");
   }
   if (dom.timelineChart) {
-    const tooltip = document.getElementById("chartTooltip");
-    drawTimelineChart(dom.timelineChart, [{ label: "0", production: 0, consumption: 0, shared: 0 }], tooltip);
+    drawTimelineChart(dom.timelineChart, [{ label: "0", production: 0, consumption: 0, shared: 0 }], null);
   }
   if (dom.optProgress) {
     dom.optProgress.textContent =
       pageMode === "sharing"
-        ? "Zobrazen přehled výroben: výroba, sdílení, zůstatek a ušlá příležitost."
+        ? "Zobrazen přehled výroben: sdílení a zůstatek po sdílení. Ušlá příležitost je v detailu po najetí myší."
         : "Zobrazen graf sdílení za výrobny z nahraných dat (bez simulace).";
   }
 }
