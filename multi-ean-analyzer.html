@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EDC Multi-EAN Analyzer - Simulace</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="multi-ean-analyzer.css" />
+  </head>
+  <body data-page="simulation">
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <main class="app-shell">
+      <header class="hero">
+        <p class="kicker">EDC CSV TOOL</p>
+        <h1>Simulace sdílení pro více výrobních EAN</h1>
+        <p class="hero-text">
+          Nahráj CSV report, nastav alokace odběratelů a simuluj sdílení i optimální váhy napříč více výrobnými zdroji.
+        </p>
+        <nav class="page-nav">
+          <a href="multi-ean-sharing.html" class="nav-link">Zobrazení sdílení</a>
+          <a href="multi-ean-analyzer.html" class="nav-link is-active">Simulace</a>
+        </nav>
+      </header>
+
+      <section class="card controls">
+        <div class="control-grid">
+          <label>
+            CSV report
+            <input id="uploadCsv" type="file" accept=".csv,text/csv" />
+          </label>
+          <label>
+            Počet opakování kol sdílení (EDC)
+            <input id="rounds" type="number" min="1" max="100" value="5" />
+          </label>
+          <label>
+            Pokusů v jedné iteraci (optimalizace)
+            <input id="maxFails" type="number" min="10" max="1000000" value="600" />
+          </label>
+          <label>
+            Počet restartů (optimalizace)
+            <input id="restarts" type="number" min="1" max="2000" value="25" />
+          </label>
+        </div>
+        <p id="status" class="status">Čekám na nahrání CSV...</p>
+      </section>
+
+      <section class="card" id="metaSection" hidden>
+        <h2>Informace o souboru</h2>
+        <table class="meta-table">
+          <tbody>
+            <tr><th>Soubor</th><td id="metaFilename"></td></tr>
+            <tr><th>Interval od</th><td id="metaFrom"></td></tr>
+            <tr><th>Interval do</th><td id="metaTo"></td></tr>
+            <tr><th>Počet intervalů</th><td id="metaIntervals"></td></tr>
+            <tr><th>Výrobní EAN</th><td id="metaProducers"></td></tr>
+            <tr><th>Odběrné EAN</th><td id="metaConsumers"></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card" id="summarySection" hidden>
+        <h2>Souhrn nahraných dat</h2>
+        <div class="summary-grid">
+          <article>
+            <h3>Výrobní EAN</h3>
+            <div class="table-wrap"><table id="producerSummary"></table></div>
+          </article>
+          <article>
+            <h3>Odběrné EAN</h3>
+            <div class="table-wrap"><table id="consumerSummary"></table></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="card" id="simulationSection" hidden>
+        <h2>Simulace a optimalizace</h2>
+        <p class="muted">
+          Alokace se nastavují na odběrné EAN a aplikují se na celkovou dostupnou výrobu.
+          Výsledek je navíc rozdělen i na konkrétní příspěvek každého výrobního EAN.
+        </p>
+        <div class="table-wrap"><table id="allocationsTable"></table></div>
+
+        <div class="action-row">
+          <button id="simulateBtn" class="btn btn-primary">Simulovat sdílení</button>
+          <button id="optimizeBtn" class="btn btn-secondary">Najít optimální alokace</button>
+          <button id="exportBtn" class="btn btn-ghost" disabled>Export výsledků CSV</button>
+        </div>
+        <p id="optProgress" class="status"></p>
+
+        <div class="table-wrap"><table id="simulationResult"></table></div>
+        <div class="table-wrap"><table id="producerConsumerMatrix"></table></div>
+
+        <div class="charts-grid">
+          <article>
+            <h3>Sdílení podle odběrných EAN</h3>
+            <canvas id="consumerChart" width="640" height="300"></canvas>
+          </article>
+          <article>
+            <h3>Příspěvek výrobních EAN</h3>
+            <canvas id="producerChart" width="640" height="300"></canvas>
+          </article>
+          <article class="chart-wide">
+            <h3>Intervalový průběh (výroba/spotřeba/sdílení)</h3>
+            <canvas id="timelineChart" width="1100" height="320"></canvas>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script defer src="multi-ean-analyzer.js"></script>
+  </body>
+</html>

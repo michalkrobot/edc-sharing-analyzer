@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EDC Multi-EAN Analyzer - Zobrazení sdílení</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="multi-ean-analyzer.css" />
+  </head>
+  <body data-page="sharing">
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <main class="app-shell">
+      <header class="hero">
+        <p class="kicker">EDC CSV TOOL</p>
+        <h1>Zobrazení sdílení pro více výrobních EAN</h1>
+        <p class="hero-text">
+          Nahráj CSV report a hned uvidíš skutečné sdílení z dat. Tato stránka nepoužívá simulaci ani optimalizaci.
+        </p>
+        <nav class="page-nav">
+          <a href="multi-ean-sharing.html" class="nav-link is-active">Zobrazení sdílení</a>
+          <a href="multi-ean-analyzer.html" class="nav-link">Simulace</a>
+        </nav>
+      </header>
+
+      <section class="card controls">
+        <div class="control-grid">
+          <label>
+            CSV report
+            <input id="uploadCsv" type="file" accept=".csv,text/csv" />
+          </label>
+        </div>
+        <p id="status" class="status">Čekám na nahrání CSV...</p>
+      </section>
+
+      <section class="card" id="metaSection" hidden>
+        <h2>Informace o souboru</h2>
+        <table class="meta-table">
+          <tbody>
+            <tr><th>Soubor</th><td id="metaFilename"></td></tr>
+            <tr><th>Interval od</th><td id="metaFrom"></td></tr>
+            <tr><th>Interval do</th><td id="metaTo"></td></tr>
+            <tr><th>Počet intervalů</th><td id="metaIntervals"></td></tr>
+            <tr><th>Výrobní EAN</th><td id="metaProducers"></td></tr>
+            <tr><th>Odběrné EAN</th><td id="metaConsumers"></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card summary-stacked" id="summarySection" hidden>
+        <h2>Souhrn nahraných dat</h2>
+        <div class="summary-grid">
+          <article>
+            <h3>Výrobní EAN</h3>
+            <div class="table-wrap"><table id="producerSummary"></table></div>
+          </article>
+          <article>
+            <h3>Odběrné EAN</h3>
+            <div class="table-wrap"><table id="consumerSummary"></table></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="card" id="sharingSection" hidden>
+        <h2>Přehled za výrobny: výroba, sdílení, zůstatek a ušlá příležitost</h2>
+        <p id="optProgress" class="status"></p>
+        <canvas id="producerChart" width="1100" height="330"></canvas>
+      </section>
+
+      <section class="card" id="producerPieChartsSection" hidden>
+        <h2>Rozpad výrob po výrobně</h2>
+        <p class="section-description">Koláčové grafy pro každou výrobnu ukazují rozpad její výroby na sdílení, ušlou příležitost a zůstatek.</p>
+        <div id="producerPieCharts" class="pie-charts-grid"></div>
+      </section>
+
+      <section class="card" id="producerConsumerPieChartsSection" hidden>
+        <h2>Rozpad sdílení po odběrných místech</h2>
+        <p class="section-description">Koláčové grafy pro každou výrobnu ukazují rozdělení sdílení mezi jednotlivá odběrná místa.</p>
+        <div id="producerConsumerPieCharts" class="pie-charts-grid"></div>
+      </section>
+
+      <section class="card" id="bestDaySection" hidden>
+        <h2 id="bestDayTitle">Nejlepší den</h2>
+        <p class="section-description">Den s nejvyšším celkovým sdílením.</p>
+        <div class="chart-controls">
+          <label class="toggle-label">
+            <input type="checkbox" id="bestDayShowConsumption" checked />
+            Zobrazit spotřebu
+          </label>
+        </div>
+        <canvas id="bestDayChart" width="1100" height="320"></canvas>
+      </section>
+
+      <section class="card" id="averageDaySection" hidden>
+        <h2>Průměrný den</h2>
+        <p class="section-description">Průměr přes všechny dny v souboru – výroba, spotřeba a sdílení po 15minutových intervalech.</p>
+        <div class="chart-controls">
+          <label class="toggle-label">
+            <input type="checkbox" id="avgDayShowConsumption" checked />
+            Zobrazit spotřebu
+          </label>
+        </div>
+        <canvas id="averageDayChart" width="1100" height="320"></canvas>
+      </section>
+    </main>
+
+    <script defer src="multi-ean-analyzer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,41 @@
+ean;skupina;"skupina - planovana";"jmeno clena";alias;typ;"typ objektu";"typ zdroje";ulice;"cislo popisne";PSC;mesto;lokace;poznamka;"instalovany vykon";"predpokladany vykon";"vykon baterie";"proudova hodnota hlavniho jistice";"distribucni sazba";"rocni spotreba elektricke energie v kWh";"rocni hodnota pretoku do site v kWh";ORP;"stav pripravenosti elektromeru";"smlouva s EDC";"napetova hladina";"rezervovany prikon";"rocni rezervovana kapacita";"mesicni rezervovana kapacita"
+859182400501458299;;;"3. ZŠ Zábøeh";"3. ZŠ jídelna";Spotøební;Škola;;Školská;11;78901;Zábøeh;;"B mìøení + pøístup do DP";0;0;0;"Jistiè nad 3x160 A";"C 25d";78798;;Zábøeh;;;NN;;;
+859182400512532391;;Enerkom1;"Blaháèek Daniel";"Blaháèek - výrobna";Výrobní;"Bytový dùm";"FVE (fotovoltaika)";Sušilova;2505;78901;Zábøeh;;;26;0;0;"Jistiè nad 3×63 A a do 3×80 A vèetnì";"D 57d";20000;;Šumperk;"Elektromìr pøipraven";"Smlouva podepsána";;;;
+859182400511739203;Enerkom1;Enerkom1;"Blaháèek Daniel";"Blaháèek spotøeba";Spotøební;"Bytový dùm";;;;;;;;0;0;0;"Jistiè nad 3×63 A a do 3×80 A vèetnì";"D 57d";20000;;Zábøeh;;;;;;
+859182400509511514;;Enerkom1;"EKO servis Zábøeh s.r.o.";"Eko servis bazén spotø.";Spotøební;Jiné;;Oborník;608/39;78901;Zábøeh;;"Mám DP";0;0;0;"Jistiè nad 3x160 A";;550000;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";VN;235;140;0
+859182400512843411;;;"Jan Øihánek";"Øihánek výrob.";Výrobní;"Rodinný dùm";"FVE (fotovoltaika)";;270;78901;Rovensko;;"nemám DP";8;0;0;;;;;Šumperk;"Elektromìr pøipraven";;;;;
+859182400510322161;;;"Jan Øihánek";"Øihánek spotø.";Spotøební;"Rodinný dùm";;;270;78901;Rovensko;;"Nemám DP";0;0;0;;;;;Šumperk;"Elektromìr pøipraven";;;;;
+859182400512686490;;Enerkom1;"Janderka Aleš";"Janderka RD Benkov výrob.";Výrobní;"Rodinný dùm";"FVE (fotovoltaika)";Benkov;8;78901;Dlouhomilov;;"Pøístup do DP";5;0;0;"Jistiè nad 3×25 A a do 3×32 A vèetnì";"D 25d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400501380873;;;"Janderka Aleš";"Janderka RD Benkov spotø.";Spotøební;"Rodinný dùm";;Benkov;8;78901;Dlouhomilov;;"Pøístup do DP
+";0;0;0;"Jistiè nad 3×25 A a do 3×32 A vèetnì";"D 25d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400512643837;;;"Krobot Michal";"Krobot Michal - výrobní";Výrobní;"Rodinný dùm";"FVE (fotovoltaika)";Hrabenov;231;78963;"Ruda n. Mor.";;;12;0;30;"Jistiè nad 3×25 A a do 3×32 A vèetnì";"D 45d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400501730869;;;"Krobot Michal";"Krobot Michal - spotøební";Spotøební;"Rodinný dùm";;Hrabenov;231;78963;"Ruda n. Mor";;;0;0;0;"Jistiè nad 3×25 A a do 3×32 A vèetnì";"D 45d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400512619580;;;"Ludìk Soják";"Soják výrob.";Výrobní;"Rodinný dùm";"FVE (fotovoltaika)";;286;78901;Rovensko;;"Mám DP";9;0;0;"Jistiè nad 3×32 A a do 3×40 A vèetnì";"D 45d";;;Šumperk;"Elektromìr pøipraven";;;;;
+859182400510423738;;;"Ludìk Soják";"Soják spotø.";Spotøební;"Rodinný dùm";;;286;78901;Rovensko;;"Mám DP";0;0;0;"Jistiè nad 3×32 A a do 3×40 A vèetnì";"D 45d";;;Šumperk;"Elektromìr pøipraven";;;;;
+859182400512785629;;Enerkom1;"Lukáš Èepa";"Èepa - výrobna";Výrobní;"Rodinný dùm";"FVE (fotovoltaika)";;77;78901;Vyšehoøí;"støecha RD";"Pøístup do DP";6;0;0;"Jistiè nad 3×25 A a do 3×32 A vèetnì";"D 25d";;;Zábøeh;"Elektromìr pøipraven";"Smlouva podepsána";NN;;;
+859182400511210511;;;"Lukáš Èepa";"Èepa - spotøební";Spotøební;"Rodinný dùm";;;77;78901;Vyšehoøí;;"Pøístup do DP";0;0;0;"Jistiè nad 3×25 A a do 3×32 A vèetnì";"D 25d";;;Zábøeh;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400509457034;;Enerkom1;"Mìsto Zábøeh";"Zábøeh úøad nám. Osv. spotø.";Spotøební;Úøad;;;;;;;;0;0;0;;;;;;;;;;;
+859182400511130789;;Enerkom1;"Mìsto Zábøeh";"Zábøeh úøad Masar.nám. spotø.";Spotøební;Úøad;;;;;;;;0;0;0;;;;;;;;;;;
+859182400501456943;;Enerkom1;"Mìsto Zábøeh";"Zábøeh kulturák spotø.";Spotøební;Jiné;;;;;;;;0;0;0;;;;;;;;;;;
+859182400511548782;;Enerkom1;"Mìsto Zábøeh";"Zábøeh MŠ Zahradní";Spotøební;Školka;;;;;;;;0;0;0;;;;;;;;;;;
+859182400512624690;;Enerkom1;"Obec Malá Morava";"ObÚ M. Morava výrobna";Výrobní;Úøad;"FVE (fotovoltaika)";"Vysoký Potok";2;78833;"Malá Morava";;;10;0;0;"Jistiè nad 3×32 A a do 3×40 A vèetnì";"C 25d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400512934645;;Enerkom1;"Obec Olšany";"ObÚ Olšany výrobna";Výrobní;Úøad;"FVE (fotovoltaika)";;2;"789 62";Olšany;;;20;0;0;"Jistiè nad 3×63 A a do 3×80 A vèetnì";"C 25d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400512895465;;Enerkom1;"Obec Rovensko";"Rovensko ObÚ - výrobní";Výrobní;Úøad;"FVE (fotovoltaika)";;59;78901;Rovensko;;;9;0;0;"Jistiè nad 3×32 A a do 3×40 A vèetnì";"D 25d";7403;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400501881622;;Enerkom1;"Obec Rovensko";"Rovensko - REPO spotø.";Spotøební;"Bytový dùm";;;;78901;Rovensko;;;0;0;0;;;;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";;;;
+859182400510924075;;Enerkom1;"Obec Rovensko";"Rovensko - èerp.stanice 1 spotø.";Spotøební;Jiné;;;;;;;;0;0;0;;;;;;;;;;;
+859182400510924082;;Enerkom1;"Obec Rovensko";"Rovensko - èerp.stanice 2 spotø.";Spotøební;Jiné;;;;;;;;0;0;0;;;;;;;;;;;
+859182400501881639;;Enerkom1;"Obec Rovensko";"Rovensko Orlovna spotø.";Spotøební;Jiné;;;;;;;;0;0;0;;;;;;;;;;;
+859182400501881578;;;"Obec Rovensko";"Obec Rovensko - spotøební";Spotøební;Úøad;;;59;78901;Rovensko;;;0;0;0;"Jistiè nad 3×32 A a do 3×40 A vèetnì";"C 25d";7403;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400501861747;;Enerkom1;"Pavel Krobot";"Krobot Pavel spotø.";Spotøební;"Rodinný dùm";;;;;;;;0;0;0;;;;;;;;;;;
+859182400510239605;;;"Radim Vlk";"Vlk Rovensko";Spotøební;"Rodinný dùm";;;273;78901;Rovensko;;;0;0;0;;;;;Šumperk;;;;;;
+859182400513112608;;Enerkom1;"Sikovský Marek";"Sirkovský výrobna";Výrobní;"Rodinný dùm";"FVE (fotovoltaika)";Vikýøovice;15;78813;;;;8;0;0;"Jistiè nad 3×20 A a do 3×25 A vèetnì";"D 25d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400512098132;;Enerkom1;"Statek Winter v.o.s";"Winter - Jatka";Spotøební;Komerèní;;"Vysoké Žibøidovice";;;Hanušovice;;"Nemám DP";0;0;0;;;12471;;Šumperk;"Elektromìr pøipraven";;;;;
+859182400512098125;;Enerkom1;"Statek Winter v.o.s";"Winter kravín";Spotøební;Komerèní;;"Vysoké Žibøidovice";;;Hanušovice;;"Nemám DP";0;0;0;;;1592;;;"Elektromìr pøipraven";;;;;
+859182400501396386;;Enerkom1;"Statek Winter v.o.s";"Winter - garáž";Spotøební;Komerèní;;"Vysoké Žibøidovice";;"788 33";Hanušovice;;;0;0;0;;;930;;;"Elektromìr pøipraven";;;;;
+859182400501396331;;Enerkom1;"Statek Winter v.o.s";"Winter - dílna";Spotøební;Komerèní;;"Vysoké Žibøidovice";;;Hanušovice;;"Nemáme DP";0;0;0;;;11350;;Šumperk;"Elektromìr pøipraven";;;;;
+859182400501861662;;Enerkom1;"Zdeòka Šinclová";Šinclová;Spotøební;"Rodinný dùm";;;163;78901;Rovensko;;;0;0;0;;;;;Šumperk;"Elektromìr pøipraven";;;;;
+859182400501460193;;Enerkom1;"ZŠ a DDM Krasohled";"4. ZŠ Krasohled škola";Spotøební;Škola;;Severovýchod;26;78901;Zábøeh;;"Pøístup do DP, mìøení B";0;0;0;"Jistiè nad 3x160 A";"C 25d";;;Zábøeh;;;NN;;;
+859182400501460209;;Enerkom1;"ZŠ a DDM Krasohled";"4. ZŠ Krasohled jídelna";Spotøební;Škola;;Severovýchod;26;78901;Zábøeh;;"Pøístup do DP, mìøení B";0;0;0;"Jistiè nad 3×125 A a do 3×160 A vèetnì";"C 02d";;;Zábøeh;;;NN;;;
+859182400512302833;;Enerkom1;"ZŠ a MŠ Rovensko";"ZŠ Rovensko - výrobna";Výrobní;Škola;"FVE (fotovoltaika)";;227;78901;Rovensko;;;19;0;0;"Jistiè nad 3x160 A";"C 02d";;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400501881684;;Enerkom1;"ZŠ a MŠ Rovensko";"Rovensko ZŠ spotøební";Spotøební;Škola;;;227;78901;Rovensko;;;0;0;0;"Jistiè nad 3x160 A";"C 02d";24216;;Šumperk;"Elektromìr pøipraven";"Smlouva zaregistrována ke sdílení";NN;;;
+859182400512934638;;Enerkom1;"ZŠ Olšany";"ZŠ Olšany výrobna";Výrobní;;"FVE (fotovoltaika)";;;;;;;0;0;0;;;;;;;;;;;

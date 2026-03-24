@@ -1,0 +1,15 @@
+# OS/editor
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local generated archives
+*.zip
+
+# Local export data files
+Export-dat-*.csv
+
+# Node artifacts (if ever used)
+node_modules/
