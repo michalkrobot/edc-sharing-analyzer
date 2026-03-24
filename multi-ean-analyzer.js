@@ -1373,7 +1373,7 @@ function renderCharts(data, result) {
   drawTimelineChart(dom.timelineChart, result.intervalTotals);
 }
 
-function drawPieChart(canvas, values, colors) {
+function drawPieChart(canvas, values, colors, labels, tooltip) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
@@ -1381,58 +1381,139 @@ function drawPieChart(canvas, values, colors) {
   const h = canvas.height;
   const centerX = w / 2;
   const centerY = h / 2;
-  const radius = Math.min(w, h) / 2 - 8;
+  const radius = Math.min(w, h) / 2 - 12;
 
   const total = values.reduce((a, b) => a + b, 0);
   if (total === 0) return;
+  // Store slice info for hover detection
+  canvas.slices = [];
+
 
   let currentAngle = -Math.PI / 2;
   
   for (let i = 0; i < values.length; i += 1) {
     const sliceAngle = (values[i] / total) * 2 * Math.PI;
     
-    // Draw pie slice
+    const midAngle = currentAngle + sliceAngle / 2;
+    
+    // Store slice info for hover detection
+    canvas.slices.push({
+      startAngle: currentAngle,
+      endAngle: currentAngle + sliceAngle,
+      midAngle: midAngle,
+      radius: radius,
+      centerX: centerX,
+      centerY: centerY,
+      label: labels ? labels[i] : `${((values[i] / total) * 100).toFixed(0)}%`,
+      value: values[i],
+      color: colors[i],
+      pct: ((values[i] / total) * 100).toFixed(1)
+    });
+
+    // Draw shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.08)";
+    ctx.beginPath();
+    ctx.moveTo(centerX + 2, centerY + 2);
+    ctx.arc(centerX + 2, centerY + 2, radius, currentAngle, currentAngle + sliceAngle);
+    ctx.lineTo(centerX + 2, centerY + 2);
+    ctx.fill();
+    
+    // Draw pie slice with gradient
+    const gradient = ctx.createLinearGradient(centerX, centerY - radius, centerX, centerY + radius);
+    gradient.addColorStop(0, colors[i]);
+    gradient.addColorStop(1, `${colors[i]}dd`);
+    
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
     ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + sliceAngle);
     ctx.lineTo(centerX, centerY);
-    ctx.fillStyle = colors[i];
     ctx.fill();
     
     // Draw border
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 2;
     ctx.stroke();
 
     // Draw percentage label
-    const midAngle = currentAngle + sliceAngle / 2;
     const labelDist = radius * 0.65;
     const labelX = centerX + Math.cos(midAngle) * labelDist;
     const labelY = centerY + Math.sin(midAngle) * labelDist;
     
     const pct = ((values[i] / total) * 100).toFixed(0);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 11px Space Grotesk";
+    ctx.font = "bold 12px Space Grotesk";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     
     if (pct > 5) {
+      ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
+      ctx.shadowBlur = 3;
       ctx.fillText(`${pct}%`, labelX, labelY);
+      ctx.shadowColor = "transparent";
     }
 
     currentAngle += sliceAngle;
   }
-}
 
+  // Add mousemove handler if tooltip provided
+  if (tooltip) {
+    canvas.onmousemove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left - centerX;
+      const mouseY = e.clientY - rect.top - centerY;
+      const distance = Math.sqrt(mouseX * mouseX + mouseY * mouseY);
+      const angle = Math.atan2(mouseY, mouseX);
+      
+      let found = false;
+      for (const slice of canvas.slices) {
+        const startAngle = slice.startAngle;
+        const endAngle = slice.endAngle;
+        let normalizedAngle = angle;
+        
+        // Normalize angle to match canvas coordinate system
+        while (normalizedAngle < startAngle) normalizedAngle += Math.PI * 2;
+        while (normalizedAngle >= startAngle + Math.PI * 2) normalizedAngle -= Math.PI * 2;
+        
+        if (distance <= radius && normalizedAngle >= startAngle && normalizedAngle <= endAngle) {
+          found = true;
+          
+          const tooltipHtml = `
+            <strong>${slice.label}</strong><br/>
+            ${slice.value.toFixed(1)} kWh (${slice.pct}%)
+          `;
+          
+          tooltip.innerHTML = tooltipHtml;
+          tooltip.style.left = (e.clientX + 12) + "px";
+          tooltip.style.top = (e.clientY - 8) + "px";
+          tooltip.removeAttribute("hidden");
+          break;
+        }
+      }
+      
+      if (!found) {
+        tooltip.setAttribute("hidden", "");
+      }
+    };
+    
+
+    canvas.onmouseleave = () => {
+      tooltip.setAttribute("hidden", "");
+    };
+  }
+}
 function renderProducerPieCharts(producerStats) {
   const container = document.getElementById("producerPieCharts");
   const section = document.getElementById("producerPieChartsSection");
+  const tooltip = document.getElementById("chartTooltip");
   
   if (!container || !section) return;
   
   container.innerHTML = "";
   
-  const colors = ["#0f766e", "#b91c1c", "#d97706"];
+  const colors = ["#10b981", "#ef4444", "#f59e0b"];
+  const labels = ["Sdílení", "Ušlá příl.", "Zůstatek"];
   
   for (const producer of producerStats) {
     const shared = Math.max(0, producer.before - producer.after);
@@ -1459,15 +1540,15 @@ function renderProducerPieCharts(producerStats) {
     const statsDiv = document.createElement("div");
     statsDiv.style.cssText = "font-size: 10px; color: #5f6d5c; margin-top: 0.4rem; line-height: 1.3;";
     statsDiv.innerHTML = `
-      <div><span style="color: #0f766e;">●</span> Sdílení: ${shared.toFixed(1)} kWh</div>
-      <div><span style="color: #b91c1c;">●</span> Ušlá příl.: ${missed.toFixed(1)} kWh</div>
-      <div><span style="color: #d97706;">●</span> Zůstatek: ${remainder.toFixed(1)} kWh</div>
+      <div><span style="color: #10b981;">●</span> Sdílení: ${shared.toFixed(1)} kWh</div>
+      <div><span style="color: #ef4444;">●</span> Ušlá příl.: ${missed.toFixed(1)} kWh</div>
+      <div><span style="color: #f59e0b;">●</span> Zůstatek: ${remainder.toFixed(1)} kWh</div>
     `;
     wrapper.appendChild(statsDiv);
     
     container.appendChild(wrapper);
     
-    drawPieChart(canvas, values, colors);
+    drawPieChart(canvas, values, colors, labels, tooltip);
   }
   
   section.hidden = false;
@@ -1534,6 +1615,8 @@ function renderProducerConsumerPieCharts(data) {
 
     const values = mainItems.map((it) => it.shared);
     const colors = mainItems.map((it) => it.colorIndex >= 0 ? CONSUMER_COLORS[it.colorIndex % CONSUMER_COLORS.length] : "#9ca3af");
+    const labels = mainItems.map((it) => it.name ? displayEan(it.name) : "Ostatní");
+    const tooltip = document.getElementById("chartTooltip");
 
     const wrapper = document.createElement("div");
     wrapper.className = "pie-chart-container";
@@ -1556,7 +1639,7 @@ function renderProducerConsumerPieCharts(data) {
 
     container.appendChild(wrapper);
 
-    drawPieChart(canvas, values, colors);
+    drawPieChart(canvas, values, colors, labels, tooltip);
   }
 
   section.hidden = false;
