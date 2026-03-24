@@ -84,6 +84,7 @@ let gLastResult = null;
 let gEanLabelMap = new Map(Object.entries(DEFAULT_EAN_LABELS));
 let gSelectedProducerName = null;
 let gExpandedConsumerNames = new Set();
+let gExpandedProducerNames = new Set();
 let gProducerSearch = "";
 let gConsumerSearch = "";
 let gProducerSort = { key: "shared", direction: "desc" };
@@ -432,6 +433,7 @@ function renderSummary(data) {
     ? producerAllocations.find((producer) => producer.name === gSelectedProducerName) || null
     : null;
   const consumerBreakdownMap = new Map();
+  const producerConsumerBreakdownMap = new Map();
   for (const producer of producerAllocations) {
     for (const allocation of producer.consumerAllocations) {
       if (allocation.shared <= 0.001) {
@@ -440,9 +442,15 @@ function renderSummary(data) {
       const breakdown = consumerBreakdownMap.get(allocation.name) || [];
       breakdown.push({ producerName: producer.name, shared: allocation.shared });
       consumerBreakdownMap.set(allocation.name, breakdown);
+      const producerBreakdown = producerConsumerBreakdownMap.get(producer.name) || [];
+      producerBreakdown.push({ consumerName: allocation.name, shared: allocation.shared });
+      producerConsumerBreakdownMap.set(producer.name, producerBreakdown);
     }
   }
   consumerBreakdownMap.forEach((breakdown) => {
+    breakdown.sort((a, b) => b.shared - a.shared);
+  });
+  producerConsumerBreakdownMap.forEach((breakdown) => {
     breakdown.sort((a, b) => b.shared - a.shared);
   });
   const producerConsumerShareMap = new Map(
@@ -479,18 +487,73 @@ function renderSummary(data) {
     .filter((producer) => matchesSummarySearch(producer.name, gProducerSearch))
     .sort((a, b) => compareValues(a[gProducerSort.key], b[gProducerSort.key], gProducerSort.direction));
 
+  const visibleProducerNames = new Set(visibleProducers.map((producer) => producer.name));
+  gExpandedProducerNames = new Set([...gExpandedProducerNames].filter((name) => visibleProducerNames.has(name)));
+
   for (const p of visibleProducers) {
+    const sharedValue = p.shared;
+    const isExpanded = gExpandedProducerNames.has(p.name);
+    const breakdown = producerConsumerBreakdownMap.get(p.name) || [];
+    const breakdownTotal = breakdown.reduce((sumValue, item) => sumValue + item.shared, 0);
+
     const tr = document.createElement("tr");
-    if (pageMode === "sharing") {
-      tr.className = "interactive-row";
-      tr.dataset.producerName = p.name;
-      if (gSelectedProducerName === p.name) {
-        tr.classList.add("is-selected");
-      }
+    tr.className = "interactive-row";
+    tr.dataset.producerName = p.name;
+    if (isExpanded) {
+      tr.classList.add("is-selected");
     }
     tr.innerHTML =
-      `<td class='ean'>${p.label}</td><td>${fmt(p.before)}</td><td>${fmt(p.after)}</td><td>${fmt(p.shared)}</td><td>${fmt(p.missed)}</td>`;
+      `<td class='ean'><div class='producer-main-cell'><button type='button' class='row-toggle' aria-expanded='${isExpanded ? "true" : "false"}'>${isExpanded ? "−" : "+"}</button><span>${p.label}</span></div></td><td>${fmt(p.before)}</td><td>${fmt(p.after)}</td><td>${fmt(sharedValue)}</td><td>${fmt(p.missed)}</td>`;
     pBody.appendChild(tr);
+
+    if (isExpanded) {
+      const detailRow = document.createElement("tr");
+      detailRow.className = "producer-detail-row";
+      const detailCell = document.createElement("td");
+      detailCell.className = "ean";
+      detailCell.colSpan = 5;
+
+      const breakdownRows = breakdown.length === 0
+        ? "<tr><td class='ean' colspan='3'>Tato výrobna nemá žádné sdílení pro odběry.</td></tr>"
+        : breakdown
+          .map((item) => {
+            const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
+            return `<tr><td class='ean'>${displayEan(item.consumerName)}</td><td>${fmt(item.shared)}</td><td>${percentage.toFixed(1)} %</td></tr>`;
+          })
+          .join("");
+      const breakdownBars = breakdown.length === 0
+        ? ""
+        : breakdown
+          .map((item) => {
+            const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
+            return `
+              <div class='producer-breakdown-bar-row'>
+                <div class='producer-breakdown-bar-label'>${displayEan(item.consumerName)}</div>
+                <div class='producer-breakdown-bar-track'>
+                  <div class='producer-breakdown-bar-fill' style='width: ${percentage.toFixed(1)}%'></div>
+                </div>
+                <div class='producer-breakdown-bar-value'>${percentage.toFixed(1)} %</div>
+              </div>`;
+          })
+          .join("");
+
+      detailCell.innerHTML = `
+        <div class='producer-breakdown'>
+          <div class='producer-breakdown-header'>
+            <strong>Rozpad sdílení výrobny ${displayEan(p.name)}</strong>
+            <span>Celkem sdíleno: ${fmt(Math.max(0, p.before - p.after))}</span>
+          </div>
+          <div class='producer-breakdown-bars'>${breakdownBars}</div>
+          <table class='producer-breakdown-table'>
+            <thead>
+              <tr><th class='ean'>Odběrné EAN</th><th>Sdíleno</th><th>Podíl</th></tr>
+            </thead>
+            <tbody>${breakdownRows}</tbody>
+          </table>
+        </div>`;
+      detailRow.appendChild(detailCell);
+      pBody.appendChild(detailRow);
+    }
   }
   if (visibleProducers.length === 0) {
     const emptyRow = document.createElement("tr");
@@ -1686,6 +1749,7 @@ function onDataLoaded(data) {
   gLastResult = null;
   gSelectedProducerName = null;
   gExpandedConsumerNames = new Set();
+  gExpandedProducerNames = new Set();
   gProducerSearch = "";
   gConsumerSearch = "";
   gProducerSort = { key: "shared", direction: "desc" };
@@ -1802,6 +1866,22 @@ if (dom.producerSummary) {
       renderSummary(gData);
       return;
     }
+    const toggleBtn = target.closest("button.row-toggle");
+    if (toggleBtn instanceof HTMLElement && gData && pageMode === "sharing") {
+      const row = target.closest("tr[data-producer-name]");
+      if (row instanceof HTMLTableRowElement) {
+        const producerName = row.dataset.producerName;
+        if (producerName) {
+          if (gExpandedProducerNames.has(producerName)) {
+            gExpandedProducerNames.delete(producerName);
+          } else {
+            gExpandedProducerNames.add(producerName);
+          }
+          renderSummary(gData);
+          return;
+        }
+      }
+    }
     const row = target.closest("tr[data-producer-name]");
     if (!(row instanceof HTMLTableRowElement)) {
       return;
@@ -1830,6 +1910,22 @@ if (dom.consumerSummary) {
       toggleSort(gConsumerSort, sortKey);
       renderSummary(gData);
       return;
+    }
+    const toggleBtn = target.closest("button.row-toggle");
+    if (toggleBtn instanceof HTMLElement) {
+      const row = target.closest("tr[data-consumer-name]");
+      if (row instanceof HTMLTableRowElement) {
+        const consumerName = row.dataset.consumerName;
+        if (consumerName) {
+          if (gExpandedConsumerNames.has(consumerName)) {
+            gExpandedConsumerNames.delete(consumerName);
+          } else {
+            gExpandedConsumerNames.add(consumerName);
+          }
+          renderSummary(gData);
+          return;
+        }
+      }
     }
     const row = target.closest("tr[data-consumer-name]");
     if (!(row instanceof HTMLTableRowElement)) {

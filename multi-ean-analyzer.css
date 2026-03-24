@@ -346,6 +346,12 @@ th.ean {
   gap: 0.45rem;
 }
 
+.producer-main-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 .row-toggle {
   flex: 0 0 auto;
   width: 1.45rem;
@@ -365,7 +371,17 @@ th.ean {
   padding: 0.7rem 0.8rem;
 }
 
+.producer-detail-row td {
+  background: #fbfdfb;
+  padding: 0.7rem 0.8rem;
+}
+
 .consumer-breakdown {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.producer-breakdown {
   display: grid;
   gap: 0.45rem;
 }
@@ -375,7 +391,20 @@ th.ean {
   gap: 0.4rem;
 }
 
+.producer-breakdown-bars {
+  display: grid;
+  gap: 0.4rem;
+}
+
 .consumer-breakdown-bar-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(140px, 3fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.84rem;
+}
+
+.producer-breakdown-bar-row {
   display: grid;
   grid-template-columns: minmax(180px, 2fr) minmax(140px, 3fr) auto;
   align-items: center;
@@ -390,7 +419,22 @@ th.ean {
   text-overflow: ellipsis;
 }
 
+.producer-breakdown-bar-label {
+  min-width: 0;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .consumer-breakdown-bar-track {
+  position: relative;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: #e6efeb;
+  overflow: hidden;
+}
+
+.producer-breakdown-bar-track {
   position: relative;
   height: 0.6rem;
   border-radius: 999px;
@@ -405,12 +449,33 @@ th.ean {
   background: linear-gradient(90deg, #0f766e, #34d399);
 }
 
+.producer-breakdown-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0f766e, #34d399);
+}
+
 .consumer-breakdown-bar-value {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
+.producer-breakdown-bar-value {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .consumer-breakdown-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.producer-breakdown-header {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
@@ -438,8 +503,27 @@ th.ean {
   background: #e8f5f2;
 }
 
+.producer-breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.producer-breakdown-table th,
+.producer-breakdown-table td {
+  white-space: nowrap;
+}
+
+.producer-breakdown-table th:last-child,
+.producer-breakdown-table td:last-child {
+  text-align: right;
+}
+
 @media (max-width: 840px) {
   .consumer-breakdown-bar-row {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
+  }
+  .producer-breakdown-bar-row {
     grid-template-columns: 1fr;
     gap: 0.3rem;
   }
