@@ -698,3 +698,34 @@ canvas {
     grid-template-columns: 1fr;
   }
 }
+
+/* Chart Tooltip */
+.chart-tooltip {
+  position: fixed;
+  background: rgba(31, 42, 29, 0.95);
+  color: #ffffff;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  pointer-events: none;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(159, 230, 211, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.chart-tooltip[hidden] {
+  display: none;
+}
+
+.chart-tooltip strong {
+  color: #a7f3d0;
+  font-weight: 600;
+}
+
+canvas {
+  cursor: crosshair;
+}

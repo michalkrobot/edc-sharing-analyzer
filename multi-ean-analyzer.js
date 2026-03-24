@@ -1044,7 +1044,7 @@ function drawBarChart(canvas, labels, values, color) {
   }
 }
 
-function drawProducerOverviewChart(canvas, producerStats) {
+function drawProducerOverviewChart(canvas, producerStats, tooltip) {
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     return;
@@ -1063,11 +1063,16 @@ function drawProducerOverviewChart(canvas, producerStats) {
   const chartH = h - pad.t - pad.b;
   const maxVal = Math.max(...production, 1);
 
+  // Store bar rectangles for hover detection
+  canvas.barRects = [];
+
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = "#1f2a1d";
   ctx.font = "13px Space Grotesk";
 
-  ctx.strokeStyle = "#dce5d8";
+  // Grid lines with subtle styling
+  ctx.strokeStyle = "rgba(220, 229, 216, 0.5)";
+  ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i += 1) {
     const y = pad.t + (chartH * i) / 4;
     ctx.beginPath();
@@ -1079,9 +1084,9 @@ function drawProducerOverviewChart(canvas, producerStats) {
   }
 
   const stackSeries = [
-    { values: shared, color: "#0f766e", label: "Sdílení" },
-    { values: missed, color: "#b91c1c", label: "Ušlá příležitost" },
-    { values: remainder, color: "#d97706", label: "Zůstatek" },
+    { values: shared, color: "#10b981", label: "Sdílení" },
+    { values: missed, color: "#ef4444", label: "Ušlá příležitost" },
+    { values: remainder, color: "#f59e0b", label: "Zůstatek" },
   ];
 
   const groupW = chartW / Math.max(1, labels.length);
@@ -1090,19 +1095,44 @@ function drawProducerOverviewChart(canvas, producerStats) {
   for (let i = 0; i < labels.length; i += 1) {
     const x = pad.l + i * groupW + (groupW - barW) / 2;
     let currentTop = pad.t + chartH;
-
-    // Collect small segments for separate text layout
     const smallSegments = [];
+    const barRectSegments = [];
 
-    // Draw stacked segments with percentage labels
     for (let s = 0; s < stackSeries.length; s += 1) {
       const val = stackSeries[s].values[i];
       const barH = (val / maxVal) * chartH;
       const y = currentTop - barH;
-      ctx.fillStyle = stackSeries[s].color;
+      
+      // Create gradient
+      const gradient = ctx.createLinearGradient(x, y, x, currentTop);
+      const colors = [
+        { color: stackSeries[s].color, opacity: 1 },
+        { color: stackSeries[s].color, opacity: 0.7 }
+      ];
+      gradient.addColorStop(0, colors[0].color);
+      gradient.addColorStop(1, colors[1].color);
+      
+      // Draw shadow
+      ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+      ctx.fillRect(x + 2, y + 2, barW, barH);
+      
+      // Draw bar with gradient
+      ctx.fillStyle = gradient;
       ctx.fillRect(x, y, barW, barH);
+      
+      // Draw border
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, barW, barH);
 
-      // Add percentage text - inside if tall enough, otherwise collect for later
+      barRectSegments.push({
+        x, y, w: barW, h: barH,
+        label: stackSeries[s].label,
+        value: val,
+        percent: ((val / production[i]) * 100).toFixed(1)
+      });
+
+      // Add percentage text
       const pct = ((val / production[i]) * 100).toFixed(0);
       ctx.font = "bold 12px Space Grotesk";
       
@@ -1120,7 +1150,7 @@ function drawProducerOverviewChart(canvas, producerStats) {
       currentTop = y;
     }
 
-    // Draw text for small segments with proper spacing
+    // Draw text for small segments
     const lineHeight = 15;
     smallSegments.sort((a, b) => a.y - b.y);
     let lastY = -Infinity;
@@ -1133,21 +1163,34 @@ function drawProducerOverviewChart(canvas, producerStats) {
       lastY = textY;
     }
 
-    // Blue outline marks the total production column height
+    // Store bar info for hover detection
+    canvas.barRects.push({
+      x, y: pad.t + chartH - (production[i] / maxVal) * chartH,
+      w: barW, h: (production[i] / maxVal) * chartH,
+      producerName: producerStats[i].name,
+      producerLabel: labels[i],
+      production: production[i],
+      shared: shared[i],
+      missed: missed[i],
+      remainder: remainder[i],
+      segments: barRectSegments
+    });
+
+    // Blue outline marks total production
     const totalH = (production[i] / maxVal) * chartH;
     const totalY = pad.t + chartH - totalH;
-    ctx.strokeStyle = "#2563eb";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#3b82f6";
+    ctx.lineWidth = 2.5;
     ctx.strokeRect(x - 1, totalY - 1, barW + 2, totalH + 2);
 
-    // Show total production value just above the column (clamped below label area)
+    // Show total production value
     ctx.fillStyle = "#1f2a1d";
     ctx.font = "bold 11px Space Grotesk";
     ctx.textAlign = "center";
     ctx.fillText(production[i].toFixed(1), x + barW / 2, Math.max(pad.t - 3, totalY - 5));
     ctx.textAlign = "left";
 
-    // Producer name label at top (above chart area), word-wrapped
+    // Producer name label
     const maxLabelWidth = groupW - 4;
     ctx.font = "bold 11px Space Grotesk";
     ctx.textAlign = "center";
@@ -1174,12 +1217,12 @@ function drawProducerOverviewChart(canvas, producerStats) {
     ctx.textAlign = "left";
   }
 
-  // Legend – horizontal, centered at the bottom
+  // Legend – modernní design
   const legendItems = [
-    { color: "#2563eb", label: "Výroba (celkem)" },
-    { color: "#0f766e", label: "Sdílení" },
-    { color: "#b91c1c", label: "Ušlá příležitost" },
-    { color: "#d97706", label: "Zůstatek" },
+    { color: "#3b82f6", label: "Výroba (celkem)" },
+    { color: "#10b981", label: "Sdílení" },
+    { color: "#ef4444", label: "Ušlá příležitost" },
+    { color: "#f59e0b", label: "Zůstatek" },
   ];
   ctx.font = "11px Space Grotesk";
   let totalLegendWidth = 0;
@@ -1190,11 +1233,60 @@ function drawProducerOverviewChart(canvas, producerStats) {
   const legendY = h - 14;
   for (const item of legendItems) {
     ctx.fillStyle = item.color;
-    ctx.fillRect(legendX, legendY - 10, 12, 12);
+    ctx.beginPath();
+    ctx.arc(legendX + 6, legendY - 6, 6, 0, Math.PI * 2);
+    ctx.fill();
     legendX += 16;
     ctx.fillStyle = "#20301e";
     ctx.fillText(item.label, legendX, legendY);
     legendX += ctx.measureText(item.label).width + 20;
+  }
+
+  // Add mousemove handler if tooltip provided
+  if (tooltip) {
+    canvas.onmousemove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      let found = false;
+      for (const bar of canvas.barRects) {
+        if (mouseX >= bar.x && mouseX <= bar.x + bar.w &&
+            mouseY >= bar.y && mouseY <= bar.y + bar.h) {
+          found = true;
+          
+          // Check which segment we're in
+          let segmentInfo = { label: "", value: "0" };
+          let currentY = bar.y;
+          for (const segment of bar.segments) {
+            if (mouseY >= currentY && mouseY < currentY + segment.h) {
+              segmentInfo = segment;
+              break;
+            }
+            currentY += segment.h;
+          }
+          
+          const tooltipHtml = `
+            <strong>${bar.producerLabel}</strong><br/>
+            ${segmentInfo.label}: <strong>${segmentInfo.value} kWh</strong> (${segmentInfo.percent}%)
+          `;
+          
+          tooltip.innerHTML = tooltipHtml;
+          tooltip.style.left = (e.clientX + 12) + "px";
+          tooltip.style.top = (e.clientY - 8) + "px";
+          tooltip.removeAttribute("hidden");
+          break;
+        }
+      }
+      
+      if (!found) {
+        tooltip.setAttribute("hidden", "");
+      }
+    };
+    
+    canvas.onmouseleave = () => {
+      tooltip.setAttribute("hidden", "");
+    };
   }
 }
 
@@ -1790,7 +1882,8 @@ function onDataLoaded(data) {
 
   if (dom.producerChart) {
     if (pageMode === "sharing") {
-      drawProducerOverviewChart(dom.producerChart, producerStats);
+      const tooltip = document.getElementById("chartTooltip");
+      drawProducerOverviewChart(dom.producerChart, producerStats, tooltip);
       renderProducerPieCharts(producerStats);
       renderProducerConsumerPieCharts(data);
       renderBestDayChart(data);
