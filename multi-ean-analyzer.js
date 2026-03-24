@@ -605,16 +605,8 @@ function renderSummary(data) {
       detailCell.className = "ean";
       detailCell.colSpan = 5;
 
-      const breakdownRows = breakdown.length === 0
-        ? "<tr><td class='ean' colspan='3'>Tato výrobna nemá žádné sdílení pro odběry.</td></tr>"
-        : breakdown
-          .map((item) => {
-            const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
-            return `<tr><td class='ean'>${displayEan(item.consumerName)}</td><td>${fmt(item.shared)}</td><td>${percentage.toFixed(1)} %</td></tr>`;
-          })
-          .join("");
       const breakdownBars = breakdown.length === 0
-        ? ""
+        ? "<div class='producer-breakdown-empty'>Tato výrobna nemá žádné sdílení pro odběry.</div>"
         : breakdown
           .map((item) => {
             const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
@@ -624,7 +616,7 @@ function renderSummary(data) {
                 <div class='producer-breakdown-bar-track'>
                   <div class='producer-breakdown-bar-fill' style='width: ${percentage.toFixed(1)}%'></div>
                 </div>
-                <div class='producer-breakdown-bar-value'>${percentage.toFixed(1)} %</div>
+                <div class='producer-breakdown-bar-value'>${percentage.toFixed(1)} % | ${fmt(item.shared)}</div>
               </div>`;
           })
           .join("");
@@ -636,12 +628,6 @@ function renderSummary(data) {
             <span>Celkem sdíleno: ${fmt(Math.max(0, p.before - p.after))}</span>
           </div>
           <div class='producer-breakdown-bars'>${breakdownBars}</div>
-          <table class='producer-breakdown-table'>
-            <thead>
-              <tr><th class='ean'>Odběrné EAN</th><th>Sdíleno</th><th>Podíl</th></tr>
-            </thead>
-            <tbody>${breakdownRows}</tbody>
-          </table>
         </div>`;
       detailRow.appendChild(detailCell);
       pBody.appendChild(detailRow);
@@ -703,27 +689,19 @@ function renderSummary(data) {
       detailCell.className = "ean";
       detailCell.colSpan = 5;
 
-      const breakdownRows = breakdown.length === 0
-        ? "<tr><td class='ean' colspan='3'>K tomuto odběrnému EAN nebylo nalezeno žádné sdílení od výroben.</td></tr>"
-        : breakdown
-          .map((item) => {
-            const highlighted = gSelectedProducerName && item.producerName === gSelectedProducerName ? " class='is-highlighted'" : "";
-            const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
-            return `<tr${highlighted}><td class='ean'>${displayEan(item.producerName)}</td><td>${fmt(item.shared)}</td><td>${percentage.toFixed(1)} %</td></tr>`;
-          })
-          .join("");
       const breakdownBars = breakdown.length === 0
-        ? ""
+        ? "<div class='consumer-breakdown-empty'>K tomuto odběrnému EAN nebylo nalezeno žádné sdílení od výroben.</div>"
         : breakdown
           .map((item) => {
             const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
+            const highlighted = gSelectedProducerName && item.producerName === gSelectedProducerName ? " is-highlighted" : "";
             return `
-              <div class='consumer-breakdown-bar-row'>
+              <div class='consumer-breakdown-bar-row${highlighted}'>
                 <div class='consumer-breakdown-bar-label'>${displayEan(item.producerName)}</div>
                 <div class='consumer-breakdown-bar-track'>
                   <div class='consumer-breakdown-bar-fill' style='width: ${percentage.toFixed(1)}%'></div>
                 </div>
-                <div class='consumer-breakdown-bar-value'>${percentage.toFixed(1)} %</div>
+                <div class='consumer-breakdown-bar-value'>${percentage.toFixed(1)} % | ${fmt(item.shared)}</div>
               </div>`;
           })
           .join("");
@@ -735,12 +713,6 @@ function renderSummary(data) {
             <span>Celkem sdíleno: ${fmt(Math.max(0, c.before - c.after))}</span>
           </div>
           <div class='consumer-breakdown-bars'>${breakdownBars}</div>
-          <table class='consumer-breakdown-table'>
-            <thead>
-              <tr><th class='ean'>Výrobní EAN</th><th>Sdíleno</th><th>Podíl</th></tr>
-            </thead>
-            <tbody>${breakdownRows}</tbody>
-          </table>
         </div>`;
       detailRow.appendChild(detailCell);
       cBody.appendChild(detailRow);
