@@ -1290,7 +1290,7 @@ function drawProducerOverviewChart(canvas, producerStats, tooltip) {
   }
 }
 
-function drawTimelineChart(canvas, points) {
+function drawTimelineChart(canvas, points, tooltip) {
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     return;
@@ -1309,6 +1309,13 @@ function drawTimelineChart(canvas, points) {
   );
 
   ctx.clearRect(0, 0, w, h);
+
+  const bgGrad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+  bgGrad.addColorStop(0, "#f9fcf7");
+  bgGrad.addColorStop(1, "#eef5eb");
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(pad.l, pad.t, chartW, chartH);
+
   ctx.strokeStyle = "#dce5d8";
   for (let i = 0; i <= 4; i += 1) {
     const y = pad.t + (chartH * i) / 4;
@@ -1318,9 +1325,10 @@ function drawTimelineChart(canvas, points) {
     ctx.stroke();
   }
 
-  const drawSeries = (key, color) => {
+  const pointMeta = [];
+  const drawSeries = (key, color, label) => {
     ctx.beginPath();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.4;
     ctx.strokeStyle = color;
     for (let i = 0; i < points.length; i += 1) {
       const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
@@ -1330,13 +1338,67 @@ function drawTimelineChart(canvas, points) {
       } else {
         ctx.lineTo(x, y);
       }
+
+      pointMeta.push({
+        x,
+        y,
+        r: 5,
+        key,
+        seriesLabel: label,
+        timeLabel: points[i].label,
+        value: points[i][key],
+      });
     }
     ctx.stroke();
+
+    for (let i = 0; i < points.length; i += 1) {
+      const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
+      const y = pad.t + chartH - (points[i][key] / maxVal) * chartH;
+      ctx.beginPath();
+      ctx.fillStyle = "#ffffff";
+      ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = color;
+      ctx.arc(x, y, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
   };
 
-  drawSeries("production", "#2563eb");
-  drawSeries("consumption", "#d97706");
-  drawSeries("shared", "#0f766e");
+  drawSeries("production", "#2563eb", "Výroba");
+  drawSeries("consumption", "#f59e0b", "Spotřeba");
+  drawSeries("shared", "#10b981", "Sdílení");
+
+  if (tooltip) {
+    canvas.onmousemove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = ((e.clientX - rect.left) * canvas.width) / rect.width;
+      const mouseY = ((e.clientY - rect.top) * canvas.height) / rect.height;
+
+      let hovered = null;
+      for (const pt of pointMeta) {
+        const dx = mouseX - pt.x;
+        const dy = mouseY - pt.y;
+        if ((dx * dx) + (dy * dy) <= pt.r * pt.r * 2.2) {
+          hovered = pt;
+          break;
+        }
+      }
+
+      if (hovered) {
+        tooltip.innerHTML = `<strong>${hovered.seriesLabel}</strong><br/>${hovered.timeLabel}<br/>${hovered.value.toFixed(2)} kWh`;
+        tooltip.style.left = `${e.clientX + 14}px`;
+        tooltip.style.top = `${e.clientY + 14}px`;
+        tooltip.removeAttribute("hidden");
+      } else {
+        tooltip.setAttribute("hidden", "");
+      }
+    };
+
+    canvas.onmouseleave = () => {
+      tooltip.setAttribute("hidden", "");
+    };
+  }
 
   ctx.fillStyle = "#20301e";
   ctx.font = "12px Space Grotesk";
@@ -1370,7 +1432,8 @@ function renderCharts(data, result) {
     "#2563eb",
   );
 
-  drawTimelineChart(dom.timelineChart, result.intervalTotals);
+  const tooltip = document.getElementById("chartTooltip");
+  drawTimelineChart(dom.timelineChart, result.intervalTotals, tooltip);
 }
 
 function drawPieChart(canvas, values, colors, labels, tooltip) {
@@ -1677,7 +1740,7 @@ function computeAverageDay(intervals) {
   return sorted;
 }
 
-function drawAverageDayChart(canvas, points, showConsumption) {
+function drawAverageDayChart(canvas, points, showConsumption, tooltip) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
@@ -1712,7 +1775,8 @@ function drawAverageDayChart(canvas, points, showConsumption) {
   }
   ctx.textAlign = "left";
 
-  const drawSeries = (key, color, width) => {
+  const pointMeta = [];
+  const drawSeries = (key, color, width, label) => {
     ctx.beginPath();
     ctx.lineWidth = width || 2;
     ctx.strokeStyle = color;
@@ -1721,13 +1785,67 @@ function drawAverageDayChart(canvas, points, showConsumption) {
       const y = pad.t + chartH - (points[i][key] / maxVal) * chartH;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
+
+      pointMeta.push({
+        x,
+        y,
+        r: 5,
+        key,
+        seriesLabel: label,
+        timeLabel: points[i].label,
+        value: points[i][key],
+      });
     }
     ctx.stroke();
+
+    for (let i = 0; i < points.length; i += 1) {
+      const x = pad.l + (chartW * i) / Math.max(1, points.length - 1);
+      const y = pad.t + chartH - (points[i][key] / maxVal) * chartH;
+      ctx.beginPath();
+      ctx.fillStyle = "#ffffff";
+      ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = color;
+      ctx.arc(x, y, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
   };
 
-  drawSeries("production", "#2563eb", 2);
-  if (showConsumption) drawSeries("consumption", "#d97706", 2);
-  drawSeries("shared", "#0f766e", 2.5);
+  drawSeries("production", "#2563eb", 2, "Výroba");
+  if (showConsumption) drawSeries("consumption", "#f59e0b", 2, "Spotřeba");
+  drawSeries("shared", "#10b981", 2.5, "Sdílení");
+
+  if (tooltip) {
+    canvas.onmousemove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = ((e.clientX - rect.left) * canvas.width) / rect.width;
+      const mouseY = ((e.clientY - rect.top) * canvas.height) / rect.height;
+
+      let hovered = null;
+      for (const pt of pointMeta) {
+        const dx = mouseX - pt.x;
+        const dy = mouseY - pt.y;
+        if ((dx * dx) + (dy * dy) <= pt.r * pt.r * 2.2) {
+          hovered = pt;
+          break;
+        }
+      }
+
+      if (hovered) {
+        tooltip.innerHTML = `<strong>${hovered.seriesLabel}</strong><br/>${hovered.timeLabel}<br/>${hovered.value.toFixed(2)} kWh`;
+        tooltip.style.left = `${e.clientX + 14}px`;
+        tooltip.style.top = `${e.clientY + 14}px`;
+        tooltip.removeAttribute("hidden");
+      } else {
+        tooltip.setAttribute("hidden", "");
+      }
+    };
+
+    canvas.onmouseleave = () => {
+      tooltip.setAttribute("hidden", "");
+    };
+  }
 
   // X-axis labels – show every full hour
   ctx.fillStyle = "#263024";
@@ -1823,7 +1941,8 @@ function renderBestDayChart(data) {
 
   const redraw = () => {
     const showConsumption = toggle ? toggle.checked : true;
-    drawAverageDayChart(canvas, points, showConsumption);
+    const tooltip = document.getElementById("chartTooltip");
+    drawAverageDayChart(canvas, points, showConsumption, tooltip);
   };
 
   if (toggle) {
@@ -1846,7 +1965,8 @@ function renderAverageDayChart(data) {
 
   const redraw = () => {
     const showConsumption = toggle ? toggle.checked : true;
-    drawAverageDayChart(canvas, points, showConsumption);
+    const tooltip = document.getElementById("chartTooltip");
+    drawAverageDayChart(canvas, points, showConsumption, tooltip);
   };
 
   if (toggle) {
@@ -1985,7 +2105,8 @@ function onDataLoaded(data) {
     drawBarChart(dom.consumerChart, ["čekám na simulaci"], [0], "#d1d5db");
   }
   if (dom.timelineChart) {
-    drawTimelineChart(dom.timelineChart, [{ label: "0", production: 0, consumption: 0, shared: 0 }]);
+    const tooltip = document.getElementById("chartTooltip");
+    drawTimelineChart(dom.timelineChart, [{ label: "0", production: 0, consumption: 0, shared: 0 }], tooltip);
   }
   if (dom.optProgress) {
     dom.optProgress.textContent =
