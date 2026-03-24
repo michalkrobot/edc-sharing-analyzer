@@ -15,7 +15,14 @@ const dom = {
   metaProducers: document.getElementById("metaProducers"),
   metaConsumers: document.getElementById("metaConsumers"),
   producerSummary: document.getElementById("producerSummary"),
+  producerSearchInput: document.getElementById("producerSearchInput"),
+  producerSearchClear: document.getElementById("producerSearchClear"),
   consumerSummary: document.getElementById("consumerSummary"),
+  consumerSearchInput: document.getElementById("consumerSearchInput"),
+  consumerSearchClear: document.getElementById("consumerSearchClear"),
+  consumerFilterStatus: document.getElementById("consumerFilterStatus"),
+  toggleAllConsumersBtn: document.getElementById("toggleAllConsumersBtn"),
+  clearProducerFilterBtn: document.getElementById("clearProducerFilterBtn"),
   allocationsTable: document.getElementById("allocationsTable"),
   simulationResult: document.getElementById("simulationResult"),
   producerConsumerMatrix: document.getElementById("producerConsumerMatrix"),
@@ -75,6 +82,12 @@ const DEFAULT_EAN_LABELS = {
 let gData = null;
 let gLastResult = null;
 let gEanLabelMap = new Map(Object.entries(DEFAULT_EAN_LABELS));
+let gSelectedProducerName = null;
+let gExpandedConsumerNames = new Set();
+let gProducerSearch = "";
+let gConsumerSearch = "";
+let gProducerSort = { key: "shared", direction: "desc" };
+let gConsumerSort = { key: "shared", direction: "desc" };
 
 function parseSemicolonCsvLine(line) {
   const out = [];
@@ -112,6 +125,43 @@ function displayEan(ean) {
   const key = normalizeEan(ean);
   const label = gEanLabelMap.get(key);
   return label ? `${label} (${ean})` : ean;
+}
+
+function makeSortableHeader(columns, sortState, tableName) {
+  const cells = columns.map((column) => {
+    const isActive = sortState.key === column.key;
+    const indicator = isActive ? (sortState.direction === "desc" ? "↓" : "↑") : "↕";
+    const eanClass = column.key === "label" ? " ean" : "";
+    return `<th class='sortable-header${eanClass}' data-sort-table='${tableName}' data-sort-key='${column.key}'>${column.label}<span class='sort-indicator'>${indicator}</span></th>`;
+  });
+  return `<thead><tr>${cells.join("")}</tr></thead>`;
+}
+
+function compareValues(a, b, direction) {
+  if (typeof a === "string" || typeof b === "string") {
+    const result = String(a).localeCompare(String(b), "cs");
+    return direction === "asc" ? result : -result;
+  }
+  const result = Number(a) - Number(b);
+  return direction === "asc" ? result : -result;
+}
+
+function toggleSort(sortState, key) {
+  if (sortState.key === key) {
+    sortState.direction = sortState.direction === "desc" ? "asc" : "desc";
+  } else {
+    sortState.key = key;
+    sortState.direction = "desc";
+  }
+}
+
+function matchesSummarySearch(ean, query) {
+  if (!query) {
+    return true;
+  }
+  const display = displayEan(ean).toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  return display.includes(normalizedQuery) || normalizeEan(ean).includes(normalizeEan(query));
 }
 
 function buildEanLabelMapFromText(csvText) {
@@ -377,29 +427,189 @@ function renderMeta(data) {
 
 function renderSummary(data) {
   const { producerStats, consumerStats } = aggregateSummary(data);
+  const producerAllocations = computeProducerConsumerAllocations(data);
+  const selectedProducerAllocations = pageMode === "sharing" && gSelectedProducerName
+    ? producerAllocations.find((producer) => producer.name === gSelectedProducerName) || null
+    : null;
+  const consumerBreakdownMap = new Map();
+  for (const producer of producerAllocations) {
+    for (const allocation of producer.consumerAllocations) {
+      if (allocation.shared <= 0.001) {
+        continue;
+      }
+      const breakdown = consumerBreakdownMap.get(allocation.name) || [];
+      breakdown.push({ producerName: producer.name, shared: allocation.shared });
+      consumerBreakdownMap.set(allocation.name, breakdown);
+    }
+  }
+  consumerBreakdownMap.forEach((breakdown) => {
+    breakdown.sort((a, b) => b.shared - a.shared);
+  });
+  const producerConsumerShareMap = new Map(
+    producerAllocations.map((producer) => [
+      producer.name,
+      new Map(
+        producer.consumerAllocations
+          .filter((allocation) => allocation.shared > 0.001)
+          .map((allocation) => [allocation.name, allocation.shared])
+      ),
+    ])
+  );
+
+  if (gSelectedProducerName && !producerConsumerShareMap.has(gSelectedProducerName)) {
+    gSelectedProducerName = null;
+  }
+
   dom.summarySection.hidden = false;
 
-  dom.producerSummary.innerHTML =
-    "<thead><tr><th class='ean'>EAN</th><th>Výroba před</th><th>Po sdílení</th><th>Sdíleno</th><th>Ušlá příležitost</th></tr></thead>";
+  dom.producerSummary.innerHTML = makeSortableHeader([
+    { key: "label", label: "EAN" },
+    { key: "before", label: "Výroba před" },
+    { key: "after", label: "Po sdílení" },
+    { key: "shared", label: "Sdíleno" },
+    { key: "missed", label: "Ušlá příležitost" },
+  ], gProducerSort, "producer");
   const pBody = document.createElement("tbody");
-  for (const p of producerStats) {
+  const visibleProducers = producerStats
+    .map((producer) => ({
+      ...producer,
+      label: displayEan(producer.name),
+      shared: Math.max(0, producer.before - producer.after),
+    }))
+    .filter((producer) => matchesSummarySearch(producer.name, gProducerSearch))
+    .sort((a, b) => compareValues(a[gProducerSort.key], b[gProducerSort.key], gProducerSort.direction));
+
+  for (const p of visibleProducers) {
     const tr = document.createElement("tr");
+    if (pageMode === "sharing") {
+      tr.className = "interactive-row";
+      tr.dataset.producerName = p.name;
+      if (gSelectedProducerName === p.name) {
+        tr.classList.add("is-selected");
+      }
+    }
     tr.innerHTML =
-      `<td class='ean'>${displayEan(p.name)}</td><td>${fmt(p.before)}</td><td>${fmt(p.after)}</td><td>${fmt(p.before - p.after)}</td><td>${fmt(p.missed)}</td>`;
+      `<td class='ean'>${p.label}</td><td>${fmt(p.before)}</td><td>${fmt(p.after)}</td><td>${fmt(p.shared)}</td><td>${fmt(p.missed)}</td>`;
     pBody.appendChild(tr);
+  }
+  if (visibleProducers.length === 0) {
+    const emptyRow = document.createElement("tr");
+    emptyRow.innerHTML = "<td class='ean' colspan='5'>Žádný výrobní EAN neodpovídá hledání.</td>";
+    pBody.appendChild(emptyRow);
   }
   dom.producerSummary.appendChild(pBody);
 
-  dom.consumerSummary.innerHTML =
-    "<thead><tr><th class='ean'>EAN</th><th>Spotřeba před</th><th>Po sdílení</th><th>Sdíleno</th><th>Ušlá příležitost</th></tr></thead>";
+  dom.consumerSummary.innerHTML = makeSortableHeader([
+    { key: "label", label: "EAN" },
+    { key: "before", label: "Spotřeba před" },
+    { key: "after", label: "Po sdílení" },
+    { key: "shared", label: "Sdíleno" },
+    { key: "missed", label: "Ušlá příležitost" },
+  ], gConsumerSort, "consumer");
   const cBody = document.createElement("tbody");
-  for (const c of consumerStats) {
+  const producerConsumerShares = selectedProducerAllocations
+    ? producerConsumerShareMap.get(gSelectedProducerName) || new Map()
+    : null;
+  const filteredConsumers = (producerConsumerShares
+    ? consumerStats.filter((consumer) => producerConsumerShares.has(consumer.name))
+    : consumerStats)
+    .map((consumer) => ({
+      ...consumer,
+      label: displayEan(consumer.name),
+      shared: producerConsumerShares ? (producerConsumerShares.get(consumer.name) || 0) : Math.max(0, consumer.before - consumer.after),
+    }))
+    .filter((consumer) => matchesSummarySearch(consumer.name, gConsumerSearch))
+    .sort((a, b) => compareValues(a[gConsumerSort.key], b[gConsumerSort.key], gConsumerSort.direction));
+
+  const visibleConsumerNames = new Set(filteredConsumers.map((consumer) => consumer.name));
+  gExpandedConsumerNames = new Set([...gExpandedConsumerNames].filter((name) => visibleConsumerNames.has(name)));
+  const allVisibleExpanded = filteredConsumers.length > 0 && filteredConsumers.every((consumer) => gExpandedConsumerNames.has(consumer.name));
+
+  for (const c of filteredConsumers) {
+    const sharedValue = c.shared;
+    const isExpanded = gExpandedConsumerNames.has(c.name);
+    const breakdown = consumerBreakdownMap.get(c.name) || [];
+    const breakdownTotal = breakdown.reduce((sumValue, item) => sumValue + item.shared, 0);
+
     const tr = document.createElement("tr");
+    tr.className = "interactive-row";
+    tr.dataset.consumerName = c.name;
+    if (isExpanded) {
+      tr.classList.add("is-selected");
+    }
     tr.innerHTML =
-      `<td class='ean'>${displayEan(c.name)}</td><td>${fmt(c.before)}</td><td>${fmt(c.after)}</td><td>${fmt(c.before - c.after)}</td><td>${fmt(c.missed)}</td>`;
+      `<td class='ean'><div class='consumer-main-cell'><button type='button' class='row-toggle' aria-expanded='${isExpanded ? "true" : "false"}'>${isExpanded ? "−" : "+"}</button><span>${c.label}</span></div></td><td>${fmt(c.before)}</td><td>${fmt(c.after)}</td><td>${fmt(sharedValue)}</td><td>${fmt(c.missed)}</td>`;
     cBody.appendChild(tr);
+
+    if (isExpanded) {
+      const detailRow = document.createElement("tr");
+      detailRow.className = "consumer-detail-row";
+      const detailCell = document.createElement("td");
+      detailCell.className = "ean";
+      detailCell.colSpan = 5;
+
+      const breakdownRows = breakdown.length === 0
+        ? "<tr><td class='ean' colspan='3'>K tomuto odběrnému EAN nebylo nalezeno žádné sdílení od výroben.</td></tr>"
+        : breakdown
+          .map((item) => {
+            const highlighted = gSelectedProducerName && item.producerName === gSelectedProducerName ? " class='is-highlighted'" : "";
+            const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
+            return `<tr${highlighted}><td class='ean'>${displayEan(item.producerName)}</td><td>${fmt(item.shared)}</td><td>${percentage.toFixed(1)} %</td></tr>`;
+          })
+          .join("");
+      const breakdownBars = breakdown.length === 0
+        ? ""
+        : breakdown
+          .map((item) => {
+            const percentage = breakdownTotal > 0 ? (item.shared / breakdownTotal) * 100 : 0;
+            return `
+              <div class='consumer-breakdown-bar-row'>
+                <div class='consumer-breakdown-bar-label'>${displayEan(item.producerName)}</div>
+                <div class='consumer-breakdown-bar-track'>
+                  <div class='consumer-breakdown-bar-fill' style='width: ${percentage.toFixed(1)}%'></div>
+                </div>
+                <div class='consumer-breakdown-bar-value'>${percentage.toFixed(1)} %</div>
+              </div>`;
+          })
+          .join("");
+
+      detailCell.innerHTML = `
+        <div class='consumer-breakdown'>
+          <div class='consumer-breakdown-header'>
+            <strong>Rozpad sdílení pro ${displayEan(c.name)}</strong>
+            <span>Celkem sdíleno: ${fmt(Math.max(0, c.before - c.after))}</span>
+          </div>
+          <div class='consumer-breakdown-bars'>${breakdownBars}</div>
+          <table class='consumer-breakdown-table'>
+            <thead>
+              <tr><th class='ean'>Výrobní EAN</th><th>Sdíleno</th><th>Podíl</th></tr>
+            </thead>
+            <tbody>${breakdownRows}</tbody>
+          </table>
+        </div>`;
+      detailRow.appendChild(detailCell);
+      cBody.appendChild(detailRow);
+    }
+  }
+  if (filteredConsumers.length === 0) {
+    const emptyRow = document.createElement("tr");
+    emptyRow.innerHTML = "<td class='ean' colspan='5'>Žádný odběrný EAN neodpovídá zvolenému filtru nebo hledání.</td>";
+    cBody.appendChild(emptyRow);
   }
   dom.consumerSummary.appendChild(cBody);
+
+  if (dom.consumerFilterStatus) {
+    dom.consumerFilterStatus.textContent = gSelectedProducerName
+      ? `Filtr odběrných EAN pro výrobnu: ${displayEan(gSelectedProducerName)}`
+      : "Zobrazeny jsou všechny odběrné EAN.";
+  }
+  if (dom.clearProducerFilterBtn) {
+    dom.clearProducerFilterBtn.hidden = !gSelectedProducerName;
+  }
+  if (dom.toggleAllConsumersBtn) {
+    dom.toggleAllConsumersBtn.hidden = filteredConsumers.length === 0;
+    dom.toggleAllConsumersBtn.textContent = allVisibleExpanded ? "Sbalit vše" : "Rozbalit vše";
+  }
 }
 
 function renderAllocationInputs(data) {
@@ -1474,6 +1684,18 @@ function triggerCsvDownload(filename, content) {
 function onDataLoaded(data) {
   gData = data;
   gLastResult = null;
+  gSelectedProducerName = null;
+  gExpandedConsumerNames = new Set();
+  gProducerSearch = "";
+  gConsumerSearch = "";
+  gProducerSort = { key: "shared", direction: "desc" };
+  gConsumerSort = { key: "shared", direction: "desc" };
+  if (dom.producerSearchInput) {
+    dom.producerSearchInput.value = "";
+  }
+  if (dom.consumerSearchInput) {
+    dom.consumerSearchInput.value = "";
+  }
   dom.status.textContent = `Nahráno: ${data.filename}`;
   if (dom.optProgress) {
     dom.optProgress.textContent = "";
@@ -1563,6 +1785,144 @@ document.addEventListener("input", (event) => {
     updateAllocationSum();
   }
 });
+
+if (dom.producerSummary) {
+  dom.producerSummary.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const sortHeader = target.closest("th[data-sort-table='producer']");
+    if (sortHeader instanceof HTMLElement) {
+      const sortKey = sortHeader.dataset.sortKey;
+      if (!sortKey || !gData) {
+        return;
+      }
+      toggleSort(gProducerSort, sortKey);
+      renderSummary(gData);
+      return;
+    }
+    const row = target.closest("tr[data-producer-name]");
+    if (!(row instanceof HTMLTableRowElement)) {
+      return;
+    }
+    const producerName = row.dataset.producerName;
+    if (!producerName || !gData || pageMode !== "sharing") {
+      return;
+    }
+    gSelectedProducerName = gSelectedProducerName === producerName ? null : producerName;
+    renderSummary(gData);
+  });
+}
+
+if (dom.consumerSummary) {
+  dom.consumerSummary.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !gData || pageMode !== "sharing") {
+      return;
+    }
+    const sortHeader = target.closest("th[data-sort-table='consumer']");
+    if (sortHeader instanceof HTMLElement) {
+      const sortKey = sortHeader.dataset.sortKey;
+      if (!sortKey) {
+        return;
+      }
+      toggleSort(gConsumerSort, sortKey);
+      renderSummary(gData);
+      return;
+    }
+    const row = target.closest("tr[data-consumer-name]");
+    if (!(row instanceof HTMLTableRowElement)) {
+      return;
+    }
+    const consumerName = row.dataset.consumerName;
+    if (!consumerName) {
+      return;
+    }
+    if (gExpandedConsumerNames.has(consumerName)) {
+      gExpandedConsumerNames.delete(consumerName);
+    } else {
+      gExpandedConsumerNames.add(consumerName);
+    }
+    renderSummary(gData);
+  });
+}
+
+if (dom.producerSearchInput) {
+  dom.producerSearchInput.addEventListener("input", () => {
+    gProducerSearch = dom.producerSearchInput.value.trim();
+    if (!gData) {
+      return;
+    }
+    renderSummary(gData);
+  });
+}
+
+if (dom.consumerSearchInput) {
+  dom.consumerSearchInput.addEventListener("input", () => {
+    gConsumerSearch = dom.consumerSearchInput.value.trim();
+    if (!gData) {
+      return;
+    }
+    renderSummary(gData);
+  });
+}
+
+if (dom.producerSearchClear) {
+  dom.producerSearchClear.addEventListener("click", () => {
+    dom.producerSearchInput.value = "";
+    gProducerSearch = "";
+    if (!gData) {
+      return;
+    }
+    renderSummary(gData);
+  });
+}
+
+if (dom.consumerSearchClear) {
+  dom.consumerSearchClear.addEventListener("click", () => {
+    dom.consumerSearchInput.value = "";
+    gConsumerSearch = "";
+    if (!gData) {
+      return;
+    }
+    renderSummary(gData);
+  });
+}
+
+if (dom.toggleAllConsumersBtn) {
+  dom.toggleAllConsumersBtn.addEventListener("click", () => {
+    if (!gData) {
+      return;
+    }
+    const { consumerStats } = aggregateSummary(gData);
+    const allocations = computeProducerConsumerAllocations(gData);
+    const selectedProducerAllocations = gSelectedProducerName
+      ? allocations.find((producer) => producer.name === gSelectedProducerName) || null
+      : null;
+    const visibleConsumers = selectedProducerAllocations
+      ? consumerStats.filter((consumer) => selectedProducerAllocations.consumerAllocations.some((allocation) => allocation.name === consumer.name && allocation.shared > 0.001))
+      : consumerStats;
+
+    const allVisibleExpanded = visibleConsumers.length > 0 && visibleConsumers.every((consumer) => gExpandedConsumerNames.has(consumer.name));
+    if (allVisibleExpanded) {
+      visibleConsumers.forEach((consumer) => gExpandedConsumerNames.delete(consumer.name));
+    } else {
+      visibleConsumers.forEach((consumer) => gExpandedConsumerNames.add(consumer.name));
+    }
+    renderSummary(gData);
+  });
+}
+
+if (dom.clearProducerFilterBtn) {
+  dom.clearProducerFilterBtn.addEventListener("click", () => {
+    if (!gData || !gSelectedProducerName) {
+      return;
+    }
+    gSelectedProducerName = null;
+    renderSummary(gData);
+  });
+}
 
 if (dom.simulateBtn) {
   dom.simulateBtn.addEventListener("click", () => {

@@ -58,10 +58,31 @@
         <div class="summary-grid">
           <article>
             <h3>Výrobní EAN</h3>
+            <p class="summary-hint">Kliknutím na řádek vyfiltruješ odběrná EAN, do kterých daná výrobna skutečně sdílí.</p>
+            <div class="summary-toolbar">
+              <div class="search-input-wrapper">
+                <input id="producerSearchInput" class="summary-search-input" type="search" placeholder="Hledat výrobní EAN..." />
+                <button id="producerSearchClear" class="search-clear-btn" type="button" title="Vymazat hledání">✕</button>
+              </div>
+            </div>
             <div class="table-wrap"><table id="producerSummary"></table></div>
           </article>
           <article>
             <h3>Odběrné EAN</h3>
+            <div class="summary-filter-bar">
+              <p id="consumerFilterStatus" class="summary-filter-status">Zobrazeny jsou všechny odběrné EAN.</p>
+              <div class="summary-filter-actions">
+                <button id="toggleAllConsumersBtn" type="button" class="btn btn-ghost">Rozbalit vše</button>
+                <button id="clearProducerFilterBtn" type="button" class="btn btn-ghost" hidden>Zrušit filtr</button>
+              </div>
+            </div>
+            <p class="summary-hint">Kliknutím na řádek odběrného EAN zobrazíš rozpad sdílení podle výrobců.</p>
+            <div class="summary-toolbar">
+              <div class="search-input-wrapper">
+                <input id="consumerSearchInput" class="summary-search-input" type="search" placeholder="Hledat odběrné EAN..." />
+                <button id="consumerSearchClear" class="search-clear-btn" type="button" title="Vymazat hledání">✕</button>
+              </div>
+            </div>
             <div class="table-wrap"><table id="consumerSummary"></table></div>
           </article>
         </div>
