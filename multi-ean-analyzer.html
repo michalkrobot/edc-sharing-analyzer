@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="cs">
   <head>
     <meta charset="UTF-8" />
@@ -10,6 +10,10 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Flex:opsz,wght@6..12,400;6..12,500;6..12,600;6..12,700;6..12,800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="multi-ean-analyzer.css" />
   </head>
   <body data-page="simulation">
@@ -17,8 +21,16 @@
     <div class="bg-shape bg-shape-b"></div>
 
     <main class="app-shell">
+      <header class="enerkom-site-header card">
+        <div class="enerkom-site-header-row">
+          <a class="enerkom-site-brand" href="https://www.enerkomhp.cz/" target="_blank" rel="noopener noreferrer" aria-label="ENERKOM Horní Pomoraví">
+            <img src="https://df515cd385.clvaw-cdnwnd.com/4dc301eb478f3703eeead6c586f7b665/200000135-074370743b/Enerkom_logo-0.png?ph=df515cd385" alt="ENERKOM Horní Pomoraví" />
+          </a>
+          <div class="app-title">EDC CSV TOOL</div>
+        </div>
+      </header>
+
       <header class="hero">
-        <p class="kicker">EDC CSV TOOL</p>
         <h1>Simulace sdílení pro více výrobních EAN</h1>
         <p class="hero-text">
           Nahráj CSV report, nastav alokace odběratelů a simuluj sdílení i optimální váhy napříč více výrobnými zdroji.
@@ -112,9 +124,17 @@
           </article>
         </div>
       </section>
+
+      <footer class="enerkom-site-footer card">
+        <div class="enerkom-site-footer-meta">
+          <span>© 2026 ENERKOM Horni Pomoravi, z.s.</span>
+        </div>
+      </footer>
     </main>
 
     <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
 </html>
+
+

@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="cs">
   <head>
     <meta charset="UTF-8" />
@@ -10,6 +10,10 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Flex:opsz,wght@6..12,400;6..12,500;6..12,600;6..12,700;6..12,800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="multi-ean-analyzer.css" />
   </head>
   <body>
@@ -17,29 +21,108 @@
     <div class="bg-shape bg-shape-b"></div>
 
     <main class="app-shell">
+      <header class="enerkom-site-header card">
+        <div class="enerkom-site-header-row">
+          <a class="enerkom-site-brand" href="https://www.enerkomhp.cz/" target="_blank" rel="noopener noreferrer" aria-label="ENERKOM Horní Pomoraví">
+            <img src="https://df515cd385.clvaw-cdnwnd.com/4dc301eb478f3703eeead6c586f7b665/200000135-074370743b/Enerkom_logo-0.png?ph=df515cd385" alt="ENERKOM Horní Pomoraví" />
+          </a>
+          <div class="app-title">EDC CSV TOOL</div>
+        </div>
+      </header>
+
       <header class="hero">
-        <p class="kicker">EDC CSV TOOL</p>
         <h1>Vyber režim práce</h1>
         <p class="hero-text">
-          Rozdělená aplikace na 2 samostatné stránky. Vyber rychlý přehled sdílení z CSV nebo detail ní simulaci s optimalizací.
+          Rozdělená aplikace na 2 samostatné stránky. Vyber rychlý přehled skutečného sdílení z CSV nebo detailní simulaci s optimalizací alokací.
         </p>
+        <div class="hero-panel">
+          <div class="hero-panel-copy">
+            <p class="hero-panel-lead">Jedna datová sada, dva pohledy na stejné sdílení.</p>
+            <p class="hero-panel-text">
+              První stránka je určená pro rychlou orientaci v tom, co se opravdu stalo. Druhá pro experimenty, simulaci a hledání vhodných vah mezi odběrnými EAN.
+            </p>
+            <div class="hero-actions">
+              <a class="hero-action hero-action-primary" href="multi-ean-sharing.html">Otevřít přehled sdílení</a>
+              <a class="hero-action hero-action-secondary" href="multi-ean-analyzer.html">Přejít do simulace</a>
+            </div>
+          </div>
+          <div class="hero-panel-badges" aria-label="Hlavní vlastnosti aplikace">
+            <div class="hero-spotlight-card hero-spotlight-sharing">
+              <span class="hero-spotlight-label">Operativní přehled</span>
+              <strong>Reálné sdílení bez konfigurace</strong>
+              <span>Souhrny, breakdowny a denní grafy ihned po nahrání CSV.</span>
+            </div>
+            <div class="hero-spotlight-card hero-spotlight-simulation">
+              <span class="hero-spotlight-label">Analytická vrstva</span>
+              <strong>Testování vah a optimalizace</strong>
+              <span>Simulace kol sdílení, restartů a exportů v jednom toku.</span>
+            </div>
+          </div>
+        </div>
+        <section class="landing-overview" aria-label="Přehled aplikace">
+          <article class="landing-metric-card">
+            <span class="landing-metric-value">2</span>
+            <span class="landing-metric-label">samostatné režimy práce</span>
+          </article>
+          <article class="landing-metric-card">
+            <span class="landing-metric-value">15 min</span>
+            <span class="landing-metric-label">typický interval EDC dat</span>
+          </article>
+          <article class="landing-metric-card">
+            <span class="landing-metric-value">CSV</span>
+            <span class="landing-metric-label">vstup bez dalších závislostí</span>
+          </article>
+        </section>
       </header>
 
       <section class="card landing-card">
+        <div class="landing-section-head">
+          <div>
+            <p class="landing-section-kicker">Vyber vstupní scénář</p>
+            <h2>Každá stránka má odlišný účel</h2>
+          </div>
+          <p class="landing-section-text">Obě cesty sdílí stejný vizuální jazyk, ale liší se hloubkou práce s daty.</p>
+        </div>
         <div class="landing-grid">
           <a class="landing-link" href="multi-ean-sharing.html">
+            <span class="landing-link-eyebrow">Operativní pohled</span>
             <h2>Zobrazení sdílení</h2>
             <p>Po nahrání CSV ihned ukáže reálné sdílení za výrobny. Bez simulace a bez alokačních vstupů.</p>
-            <span class="landing-chip">rychlý přehled</span>
+            <div class="landing-points" aria-hidden="true">
+              <span>souhrny výroben a odběrů</span>
+              <span>rozpad po rozkliknutí řádku</span>
+              <span>denní a průměrné grafy</span>
+            </div>
+            <div class="landing-link-footer">
+              <span class="landing-chip">rychlý přehled</span>
+              <span class="landing-link-arrow" aria-hidden="true">→</span>
+            </div>
           </a>
 
           <a class="landing-link" href="multi-ean-analyzer.html">
+            <span class="landing-link-eyebrow">Analytický pohled</span>
             <h2>Simulace</h2>
-            <p>Nastavení alokací, opakování kol, optimalizace váh, maticový rozpad a export vypočtených výsledků.</p>
-            <span class="landing-chip">pokročilý režim</span>
+            <p>Nastavení alokací, opakování kol, optimalizace vah, maticový rozpad a export vypočtených výsledků.</p>
+            <div class="landing-points" aria-hidden="true">
+              <span>váhy pro odběrná EAN</span>
+              <span>optimalizace a restartování výpočtu</span>
+              <span>export výsledků do CSV</span>
+            </div>
+            <div class="landing-link-footer">
+              <span class="landing-chip">pokročilý režim</span>
+              <span class="landing-link-arrow" aria-hidden="true">→</span>
+            </div>
           </a>
         </div>
       </section>
+
+      <footer class="enerkom-site-footer card">
+        <div class="enerkom-site-footer-meta">
+          <span>© 2026 ENERKOM Horni Pomoravi, z.s.</span>
+        </div>
+      </footer>
     </main>
   </body>
 </html>
+
+
