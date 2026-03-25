@@ -230,6 +230,25 @@ h1 {
   color: #134842;
 }
 
+body:not([data-page]) .hero-action-primary {
+  background: linear-gradient(135deg, #73ab40, #5d8f32);
+  box-shadow: 0 10px 24px rgba(115, 171, 64, 0.22);
+}
+
+body:not([data-page]) .hero-action-primary:hover {
+  background: linear-gradient(135deg, #7ab642, #6ab036);
+}
+
+body:not([data-page]) .hero-action-secondary {
+  border-color: #cadec5;
+  background: #eef5e8;
+  color: #3f6121;
+}
+
+body:not([data-page]) .hero-action-secondary:hover {
+  background: #e1f0d8;
+}
+
 .hero-spotlight-card {
   display: grid;
   gap: 0.26rem;
