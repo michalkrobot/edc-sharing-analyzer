@@ -67,6 +67,27 @@
         <p id="status" class="status">Čekám na nahrání CSV...</p>
       </section>
 
+      <section class="card time-range-card" id="timeFilterSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Časový filtr dat</h2>
+          <span class="sharing-section-chip">Globální filtr</span>
+        </div>
+        <p class="section-description">Nastav období od a do. Filtr ovlivní všechny tabulky i grafy na stránce.</p>
+        <div class="time-range-filter">
+          <label class="time-range-field" for="filterDateFrom">
+            Od
+            <input id="filterDateFrom" type="datetime-local" />
+          </label>
+          <div class="time-range-arrow" aria-hidden="true">→</div>
+          <label class="time-range-field" for="filterDateTo">
+            Do
+            <input id="filterDateTo" type="datetime-local" />
+          </label>
+          <button id="timeFilterResetBtn" type="button" class="btn btn-ghost">Celé období</button>
+        </div>
+        <p id="timeFilterInfo" class="summary-filter-status">Filtr není aktivní.</p>
+      </section>
+
       <section class="card" id="metaSection" hidden>
         <h2>Informace o souboru</h2>
         <table class="meta-table">

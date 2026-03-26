@@ -23,6 +23,11 @@ const dom = {
   consumerFilterStatus: document.getElementById("consumerFilterStatus"),
   toggleAllConsumersBtn: document.getElementById("toggleAllConsumersBtn"),
   clearProducerFilterBtn: document.getElementById("clearProducerFilterBtn"),
+  timeFilterSection: document.getElementById("timeFilterSection"),
+  filterDateFrom: document.getElementById("filterDateFrom"),
+  filterDateTo: document.getElementById("filterDateTo"),
+  timeFilterResetBtn: document.getElementById("timeFilterResetBtn"),
+  timeFilterInfo: document.getElementById("timeFilterInfo"),
   allocationsTable: document.getElementById("allocationsTable"),
   simulationResult: document.getElementById("simulationResult"),
   producerConsumerMatrix: document.getElementById("producerConsumerMatrix"),
@@ -80,6 +85,7 @@ const DEFAULT_EAN_LABELS = {
 };
 
 let gData = null;
+let gFilteredData = null;
 let gLastResult = null;
 let gEanLabelMap = new Map(Object.entries(DEFAULT_EAN_LABELS));
 let gSelectedProducerName = null;
@@ -354,6 +360,46 @@ function parseDate(parts) {
 function printDate(date) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toDatetimeLocalValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function parseDatetimeLocalValue(value) {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function getActiveData() {
+  return gFilteredData || gData;
+}
+
+function buildFilteredData(sourceData, fromDate, toDate) {
+  const filteredIntervals = sourceData.intervals.filter((interval) => interval.start >= fromDate && interval.start <= toDate);
+
+  if (filteredIntervals.length === 0) {
+    return {
+      ...sourceData,
+      intervals: [],
+      dateFrom: new Date(fromDate.getTime()),
+      dateTo: new Date(toDate.getTime()),
+    };
+  }
+
+  return {
+    ...sourceData,
+    intervals: filteredIntervals,
+    dateFrom: filteredIntervals[0].start,
+    dateTo: new Date(filteredIntervals[filteredIntervals.length - 1].start.getTime() + 15 * 60000),
+  };
 }
 
 function parseCsv(content, filename) {
@@ -1346,10 +1392,9 @@ function renderProducerPieCharts(producerStats) {
   const section = document.getElementById("producerPieChartsSection");
   
   if (!container || !section) return;
-
-  section.hidden = false;
   
   container.innerHTML = "";
+  let renderedCharts = 0;
   
   const colors = ["#10b981", "#ef4444", "#f59e0b"];
   const labels = ["Sdílení", "Ušlá příl.", "Zůstatek"];
@@ -1387,6 +1432,14 @@ function renderProducerPieCharts(producerStats) {
     container.appendChild(wrapper);
     
     drawPieChart(canvas, values, colors, labels, null);
+    renderedCharts += 1;
+  }
+
+  if (renderedCharts === 0) {
+    section.hidden = true;
+    container.innerHTML = "";
+  } else {
+    section.hidden = false;
   }
   
 }
@@ -1427,9 +1480,8 @@ function renderProducerConsumerPieCharts(data) {
   const section = document.getElementById("producerConsumerPieChartsSection");
   if (!container || !section) return;
 
-  section.hidden = false;
-
   container.innerHTML = "";
+  let renderedCharts = 0;
 
   const allocations = computeProducerConsumerAllocations(data);
 
@@ -1477,6 +1529,14 @@ function renderProducerConsumerPieCharts(data) {
     container.appendChild(wrapper);
 
     drawPieChart(canvas, values, colors, labels, null);
+    renderedCharts += 1;
+  }
+
+  if (renderedCharts === 0) {
+    section.hidden = true;
+    container.innerHTML = "";
+  } else {
+    section.hidden = false;
   }
 }
 
@@ -1651,7 +1711,11 @@ function renderBestDayChart(data) {
   if (!canvas || !section) return;
 
   const { date, points } = computeBestDay(data.intervals);
-  if (!points.length) return;
+  if (!points.length) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
 
   section.hidden = false;
 
@@ -1677,9 +1741,14 @@ function renderAverageDayChart(data) {
   const toggle = document.getElementById("avgDayShowConsumption");
   if (!canvas || !section) return;
 
-  section.hidden = false;
-
   const points = computeAverageDay(data.intervals);
+  if (!points.length) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  section.hidden = false;
 
   const redraw = () => {
     const showConsumption = toggle ? toggle.checked : true;
@@ -1755,8 +1824,96 @@ function triggerCsvDownload(filename, content) {
   URL.revokeObjectURL(url);
 }
 
+function resetTimeFilterToFullRange() {
+  if (!gData || !dom.filterDateFrom || !dom.filterDateTo) {
+    return;
+  }
+  const lastIntervalStart = gData.intervals.length > 0
+    ? gData.intervals[gData.intervals.length - 1].start
+    : gData.dateFrom;
+  dom.filterDateFrom.value = toDatetimeLocalValue(gData.dateFrom);
+  dom.filterDateTo.value = toDatetimeLocalValue(lastIntervalStart);
+}
+
+function renderSharingPage(data) {
+  if (!dom.sharingSection) {
+    return;
+  }
+
+  dom.sharingSection.hidden = false;
+
+  const { producerStats } = aggregateSummary(data);
+  if (dom.producerChart) {
+    drawProducerOverviewChart(dom.producerChart, producerStats, null);
+  }
+  renderProducerPieCharts(producerStats);
+  renderProducerConsumerPieCharts(data);
+  renderBestDayChart(data);
+  renderAverageDayChart(data);
+
+  if (dom.optProgress) {
+    dom.optProgress.textContent = data.intervals.length > 0
+      ? "Zobrazen přehled výroben: sdílení a zůstatek po sdílení. Ušlá příležitost je v detailu po najetí myší."
+      : "Ve zvoleném období nejsou žádná data. Uprav časový filtr.";
+  }
+}
+
+function renderCurrentView() {
+  const activeData = getActiveData();
+  if (!activeData) {
+    return;
+  }
+
+  renderMeta(activeData);
+  renderSummary(activeData);
+
+  if (pageMode === "sharing") {
+    renderSharingPage(activeData);
+  }
+}
+
+function applyTimeFilterAndRender() {
+  if (!gData || pageMode !== "sharing") {
+    return;
+  }
+
+  const rawFrom = dom.filterDateFrom ? parseDatetimeLocalValue(dom.filterDateFrom.value) : null;
+  const rawTo = dom.filterDateTo ? parseDatetimeLocalValue(dom.filterDateTo.value) : null;
+  const fallbackFrom = gData.dateFrom;
+  const fallbackTo = gData.intervals.length > 0 ? gData.intervals[gData.intervals.length - 1].start : gData.dateFrom;
+
+  let fromDate = rawFrom || fallbackFrom;
+  let toDate = rawTo || fallbackTo;
+
+  if (fromDate > toDate) {
+    const tmp = fromDate;
+    fromDate = toDate;
+    toDate = tmp;
+  }
+
+  if (dom.filterDateFrom) {
+    dom.filterDateFrom.value = toDatetimeLocalValue(fromDate);
+  }
+  if (dom.filterDateTo) {
+    dom.filterDateTo.value = toDatetimeLocalValue(toDate);
+  }
+
+  gFilteredData = buildFilteredData(gData, fromDate, toDate);
+
+  if (dom.timeFilterInfo) {
+    if (gFilteredData.intervals.length === 0) {
+      dom.timeFilterInfo.textContent = `Ve zvoleném období ${printDate(fromDate)} až ${printDate(toDate)} nejsou žádné intervaly.`;
+    } else {
+      dom.timeFilterInfo.textContent = `Zobrazeno ${gFilteredData.intervals.length} z ${gData.intervals.length} intervalů (${printDate(gFilteredData.dateFrom)} až ${printDate(gFilteredData.dateTo)}).`;
+    }
+  }
+
+  renderCurrentView();
+}
+
 function onDataLoaded(data) {
   gData = data;
+  gFilteredData = null;
   gLastResult = null;
   gSelectedProducerName = null;
   gExpandedConsumerNames = new Set();
@@ -1778,13 +1935,20 @@ function onDataLoaded(data) {
   if (dom.exportBtn) {
     dom.exportBtn.disabled = true;
   }
-  renderMeta(data);
-  renderSummary(data);
+
+  if (pageMode === "sharing") {
+    if (dom.timeFilterSection) {
+      dom.timeFilterSection.hidden = false;
+    }
+    resetTimeFilterToFullRange();
+    applyTimeFilterAndRender();
+  } else {
+    renderMeta(data);
+    renderSummary(data);
+  }
+
   if (pageMode === "simulation") {
     renderAllocationInputs(data);
-  }
-  if (pageMode === "sharing" && dom.sharingSection) {
-    dom.sharingSection.hidden = false;
   }
 
   // Po nahrání pouze zobraz grafy skutečného sdílení z CSV (bez simulace).
@@ -1800,13 +1964,7 @@ function onDataLoaded(data) {
   }
 
   if (dom.producerChart) {
-    if (pageMode === "sharing") {
-      drawProducerOverviewChart(dom.producerChart, producerStats, null);
-      renderProducerPieCharts(producerStats);
-      renderProducerConsumerPieCharts(data);
-      renderBestDayChart(data);
-      renderAverageDayChart(data);
-    } else {
+    if (pageMode !== "sharing") {
       drawBarChart(
         dom.producerChart,
         producerStats.map((p) => displayEan(p.name)),
@@ -1822,7 +1980,7 @@ function onDataLoaded(data) {
   if (dom.timelineChart) {
     drawTimelineChart(dom.timelineChart, [{ label: "0", production: 0, consumption: 0, shared: 0 }], null);
   }
-  if (dom.optProgress) {
+  if (dom.optProgress && pageMode !== "sharing") {
     dom.optProgress.textContent =
       pageMode === "sharing"
         ? "Zobrazen přehled výroben: sdílení a zůstatek po sdílení. Ušlá příležitost je v detailu po najetí myší."
@@ -1851,6 +2009,28 @@ dom.uploadCsv.addEventListener("change", async () => {
   }
 });
 
+if (dom.filterDateFrom) {
+  dom.filterDateFrom.addEventListener("change", () => {
+    applyTimeFilterAndRender();
+  });
+}
+
+if (dom.filterDateTo) {
+  dom.filterDateTo.addEventListener("change", () => {
+    applyTimeFilterAndRender();
+  });
+}
+
+if (dom.timeFilterResetBtn) {
+  dom.timeFilterResetBtn.addEventListener("click", () => {
+    if (!gData) {
+      return;
+    }
+    resetTimeFilterToFullRange();
+    applyTimeFilterAndRender();
+  });
+}
+
 document.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) {
@@ -1874,7 +2054,7 @@ if (dom.producerSummary) {
         return;
       }
       toggleSort(gProducerSort, sortKey);
-      renderSummary(gData);
+      renderSummary(getActiveData());
       return;
     }
     const toggleBtn = target.closest("button.row-toggle");
@@ -1888,7 +2068,7 @@ if (dom.producerSummary) {
           } else {
             gExpandedProducerNames.add(producerName);
           }
-          renderSummary(gData);
+          renderSummary(getActiveData());
           return;
         }
       }
@@ -1902,7 +2082,7 @@ if (dom.producerSummary) {
       return;
     }
     gSelectedProducerName = gSelectedProducerName === producerName ? null : producerName;
-    renderSummary(gData);
+    renderSummary(getActiveData());
   });
 }
 
@@ -1919,7 +2099,7 @@ if (dom.consumerSummary) {
         return;
       }
       toggleSort(gConsumerSort, sortKey);
-      renderSummary(gData);
+      renderSummary(getActiveData());
       return;
     }
     const toggleBtn = target.closest("button.row-toggle");
@@ -1933,7 +2113,7 @@ if (dom.consumerSummary) {
           } else {
             gExpandedConsumerNames.add(consumerName);
           }
-          renderSummary(gData);
+          renderSummary(getActiveData());
           return;
         }
       }
@@ -1951,27 +2131,27 @@ if (dom.consumerSummary) {
     } else {
       gExpandedConsumerNames.add(consumerName);
     }
-    renderSummary(gData);
+    renderSummary(getActiveData());
   });
 }
 
 if (dom.producerSearchInput) {
   dom.producerSearchInput.addEventListener("input", () => {
     gProducerSearch = dom.producerSearchInput.value.trim();
-    if (!gData) {
+    if (!getActiveData()) {
       return;
     }
-    renderSummary(gData);
+    renderSummary(getActiveData());
   });
 }
 
 if (dom.consumerSearchInput) {
   dom.consumerSearchInput.addEventListener("input", () => {
     gConsumerSearch = dom.consumerSearchInput.value.trim();
-    if (!gData) {
+    if (!getActiveData()) {
       return;
     }
-    renderSummary(gData);
+    renderSummary(getActiveData());
   });
 }
 
@@ -1979,10 +2159,10 @@ if (dom.producerSearchClear) {
   dom.producerSearchClear.addEventListener("click", () => {
     dom.producerSearchInput.value = "";
     gProducerSearch = "";
-    if (!gData) {
+    if (!getActiveData()) {
       return;
     }
-    renderSummary(gData);
+    renderSummary(getActiveData());
   });
 }
 
@@ -1990,20 +2170,21 @@ if (dom.consumerSearchClear) {
   dom.consumerSearchClear.addEventListener("click", () => {
     dom.consumerSearchInput.value = "";
     gConsumerSearch = "";
-    if (!gData) {
+    if (!getActiveData()) {
       return;
     }
-    renderSummary(gData);
+    renderSummary(getActiveData());
   });
 }
 
 if (dom.toggleAllConsumersBtn) {
   dom.toggleAllConsumersBtn.addEventListener("click", () => {
-    if (!gData) {
+    const activeData = getActiveData();
+    if (!activeData) {
       return;
     }
-    const { consumerStats } = aggregateSummary(gData);
-    const allocations = computeProducerConsumerAllocations(gData);
+    const { consumerStats } = aggregateSummary(activeData);
+    const allocations = computeProducerConsumerAllocations(activeData);
     const selectedProducerAllocations = gSelectedProducerName
       ? allocations.find((producer) => producer.name === gSelectedProducerName) || null
       : null;
@@ -2017,7 +2198,7 @@ if (dom.toggleAllConsumersBtn) {
     } else {
       visibleConsumers.forEach((consumer) => gExpandedConsumerNames.add(consumer.name));
     }
-    renderSummary(gData);
+    renderSummary(activeData);
   });
 }
 
@@ -2027,7 +2208,7 @@ if (dom.clearProducerFilterBtn) {
       return;
     }
     gSelectedProducerName = null;
-    renderSummary(gData);
+    renderSummary(getActiveData());
   });
 }
 

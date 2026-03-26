@@ -809,6 +809,41 @@ th.ean {
   flex-wrap: wrap;
 }
 
+.time-range-card {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(104, 159, 56, 0.2), transparent 28%),
+    radial-gradient(circle at 90% 100%, rgba(15, 118, 110, 0.16), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.93), rgba(243, 249, 236, 0.95));
+}
+
+.time-range-filter {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr) auto;
+  gap: 0.7rem;
+  align-items: end;
+  margin-top: 0.75rem;
+}
+
+.time-range-field {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.time-range-field input[type="datetime-local"] {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.55rem 0.65rem;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.time-range-arrow {
+  align-self: center;
+  color: #4a5f39;
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-top: 1.15rem;
+}
+
 .interactive-row {
   cursor: pointer;
   transition: background-color 160ms ease, box-shadow 160ms ease;
@@ -1480,6 +1515,15 @@ body[data-page="sharing"] .chart-canvas {
 }
 
 @media (max-width: 840px) {
+  .time-range-filter {
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+  }
+
+  .time-range-arrow {
+    display: none;
+  }
+
   body[data-page="sharing"] .sharing-hero-strip {
     grid-template-columns: 1fr;
   }
