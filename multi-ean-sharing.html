@@ -63,8 +63,13 @@
             CSV report
             <input id="uploadCsv" type="file" accept=".csv,text/csv" />
           </label>
+          <label>
+            EAN názvy (vlastní databáze)
+            <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
+          </label>
         </div>
         <p id="status" class="status">Čekám na nahrání CSV...</p>
+        <p id="eanLabelsStatus" class="status" style="font-size: 0.85rem; color: #5f6d5c; margin-top: 0.3rem;">EAN databáze: připraveno</p>
       </section>
 
       <section class="card time-range-card" id="timeFilterSection" hidden>
@@ -84,6 +89,21 @@
             <input id="filterDateTo" type="datetime-local" />
           </label>
           <button id="timeFilterResetBtn" type="button" class="btn btn-ghost">Celé období</button>
+        </div>
+        <div class="time-thermometer" aria-label="Teplomer casoveho filtru">
+          <div class="time-thermometer-head">
+            <strong>Teplomer intervalu</strong>
+            <span>Posuvniky upravis zacatek a konec obdobi.</span>
+          </div>
+          <div class="time-thermometer-track-wrap">
+            <div id="timeThermometerFill" class="time-thermometer-fill" aria-hidden="true"></div>
+            <input id="timeThermometerFrom" type="range" min="0" max="0" value="0" step="1" aria-label="Zacatek intervalu" />
+            <input id="timeThermometerTo" type="range" min="0" max="0" value="0" step="1" aria-label="Konec intervalu" />
+          </div>
+          <div class="time-thermometer-labels" aria-hidden="true">
+            <span id="timeThermometerMinLabel">-</span>
+            <span id="timeThermometerMaxLabel">-</span>
+          </div>
         </div>
         <p id="timeFilterInfo" class="summary-filter-status">Filtr není aktivní.</p>
       </section>

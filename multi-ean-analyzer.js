@@ -1,5 +1,7 @@
 const dom = {
   uploadCsv: document.getElementById("uploadCsv"),
+  uploadEanLabels: document.getElementById("uploadEanLabels"),
+  eanLabelsStatus: document.getElementById("eanLabelsStatus"),
   rounds: document.getElementById("rounds"),
   maxFails: document.getElementById("maxFails"),
   restarts: document.getElementById("restarts"),
@@ -26,6 +28,11 @@ const dom = {
   timeFilterSection: document.getElementById("timeFilterSection"),
   filterDateFrom: document.getElementById("filterDateFrom"),
   filterDateTo: document.getElementById("filterDateTo"),
+  timeThermometerFrom: document.getElementById("timeThermometerFrom"),
+  timeThermometerTo: document.getElementById("timeThermometerTo"),
+  timeThermometerFill: document.getElementById("timeThermometerFill"),
+  timeThermometerMinLabel: document.getElementById("timeThermometerMinLabel"),
+  timeThermometerMaxLabel: document.getElementById("timeThermometerMaxLabel"),
   timeFilterResetBtn: document.getElementById("timeFilterResetBtn"),
   timeFilterInfo: document.getElementById("timeFilterInfo"),
   allocationsTable: document.getElementById("allocationsTable"),
@@ -297,31 +304,165 @@ function buildEanLabelMapFromText(csvText) {
   return map;
 }
 
+const EAN_LABELS_STORE = "eanLabelsStore";
+const EAN_LABELS_DB = "edc-app-db";
+const EAN_LABELS_TABLE = "customEanLabels";
+
+function openIndexedDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(EAN_LABELS_DB, 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(EAN_LABELS_TABLE)) {
+        db.createObjectStore(EAN_LABELS_TABLE);
+      }
+    };
+  });
+}
+
+async function saveEanLabelsToDb(mapData) {
+  try {
+    const db = await openIndexedDb();
+    const tx = db.transaction(EAN_LABELS_TABLE, "readwrite");
+    const store = tx.objectStore(EAN_LABELS_TABLE);
+    const entries = Array.from(mapData.entries());
+    await new Promise((resolve, reject) => {
+      store.clear();
+      let count = 0;
+      for (const [ean, label] of entries) {
+        const req = store.put({ ean, label }, ean);
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          count += 1;
+          if (count === entries.length) resolve();
+        };
+      }
+      if (entries.length === 0) resolve();
+    });
+  } catch (err) {
+    console.warn("Failed to save EAN labels to IndexedDB:", err);
+  }
+}
+
+async function loadEanLabelsFromDb() {
+  try {
+    const db = await openIndexedDb();
+    const tx = db.transaction(EAN_LABELS_TABLE, "readonly");
+    const store = tx.objectStore(EAN_LABELS_TABLE);
+    const entries = [];
+    await new Promise((resolve, reject) => {
+      const request = store.getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const records = request.result;
+        for (const record of records) {
+          if (record && record.ean && record.label) {
+            entries.push([record.ean, record.label]);
+          }
+        }
+        resolve();
+      };
+    });
+    return new Map(entries);
+  } catch (err) {
+    console.warn("Failed to load EAN labels from IndexedDB:", err);
+    return new Map();
+  }
+}
+
 async function loadEanLabelMap() {
   try {
     const resp = await fetch("eany.csv", { cache: "no-store" });
-    if (!resp.ok) {
-      return;
-    }
-    const buffer = await resp.arrayBuffer();
-
-    let csvText = "";
-    try {
-      csvText = new TextDecoder("windows-1250").decode(buffer);
-    } catch {
-      csvText = new TextDecoder("utf-8").decode(buffer);
-    }
-
-    const loadedMap = buildEanLabelMapFromText(csvText);
-    if (loadedMap.size > 0) {
-      gEanLabelMap = new Map([...gEanLabelMap, ...loadedMap]);
+    if (resp.ok) {
+      const buffer = await resp.arrayBuffer();
+      let csvText = "";
+      try {
+        csvText = new TextDecoder("windows-1250").decode(buffer);
+      } catch {
+        csvText = new TextDecoder("utf-8").decode(buffer);
+      }
+      const loadedMap = buildEanLabelMapFromText(csvText);
+      if (loadedMap.size > 0) {
+        gEanLabelMap = new Map([...gEanLabelMap, ...loadedMap]);
+      }
     }
   } catch {
     // Pri otevreni pres file:// muze fetch failnout; pak zustane fallback na surove EAN.
   }
+
+  const dbMap = await loadEanLabelsFromDb();
+  if (dbMap.size > 0) {
+    gEanLabelMap = new Map([...gEanLabelMap, ...dbMap]);
+  }
+
+  updateEanLabelsStatus();
+}
+
+function updateEanLabelsStatus() {
+  if (dom.eanLabelsStatus) {
+    dom.eanLabelsStatus.textContent = `EAN databáze: ${gEanLabelMap.size} pojmenovaných EAN`;
+  }
 }
 
 const gEanLabelMapReady = loadEanLabelMap();
+
+async function handleEanLabelsUpload(file) {
+  try {
+    const text = await readFileAsText(file);
+    const uploadedMap = buildEanLabelMapFromText(text);
+    
+    if (uploadedMap.size === 0) {
+      if (dom.eanLabelsStatus) {
+        dom.eanLabelsStatus.textContent = "⚠ Soubor neobsahuje platné EAN data. Formát musí být: EAN;alias;jmeno clena";
+        dom.eanLabelsStatus.style.color = "#c2410c";
+      }
+      return;
+    }
+
+    gEanLabelMap = new Map([...gEanLabelMap, ...uploadedMap]);
+    
+    await saveEanLabelsToDb(gEanLabelMap);
+    
+    updateEanLabelsStatus();
+    
+    if (dom.eanLabelsStatus) {
+      dom.eanLabelsStatus.textContent = `✓ Přidáno ${uploadedMap.size} EAN. Databáze: ${gEanLabelMap.size} pojmenovaných EAN`;
+      dom.eanLabelsStatus.style.color = "#15803d";
+      setTimeout(() => {
+        if (dom.eanLabelsStatus) {
+          updateEanLabelsStatus();
+          dom.eanLabelsStatus.style.color = "#5f6d5c";
+        }
+      }, 3500);
+    }
+
+    if (gData) {
+      renderSummary(gData);
+      if (pageMode === "sharing") {
+        renderCurrentView();
+      }
+    }
+  } catch (err) {
+    if (dom.eanLabelsStatus) {
+      dom.eanLabelsStatus.textContent = `✗ Chyba: ${err instanceof Error ? err.message : String(err)}`;
+      dom.eanLabelsStatus.style.color = "#c2410c";
+    }
+  }
+}
+
+if (dom.uploadEanLabels) {
+  dom.uploadEanLabels.addEventListener("change", async () => {
+    const file = dom.uploadEanLabels.files && dom.uploadEanLabels.files[0];
+    if (!file) {
+      return;
+    }
+    await gEanLabelMapReady;
+    await handleEanLabelsUpload(file);
+    dom.uploadEanLabels.value = "";
+  });
+}
 
 function assert(condition, message) {
   if (!condition) {
@@ -1833,6 +1974,115 @@ function resetTimeFilterToFullRange() {
     : gData.dateFrom;
   dom.filterDateFrom.value = toDatetimeLocalValue(gData.dateFrom);
   dom.filterDateTo.value = toDatetimeLocalValue(lastIntervalStart);
+  syncTimeThermometerFromInputs();
+}
+
+function getTimeFilterBounds() {
+  if (!gData) {
+    return null;
+  }
+  const minDate = gData.dateFrom;
+  const maxDate = gData.intervals.length > 0
+    ? gData.intervals[gData.intervals.length - 1].start
+    : gData.dateFrom;
+  return { minDate, maxDate };
+}
+
+function getNearestIntervalIndex(dateValue) {
+  if (!gData || !gData.intervals || gData.intervals.length === 0) {
+    return 0;
+  }
+  const target = dateValue.getTime();
+  const intervals = gData.intervals;
+  if (target <= intervals[0].start.getTime()) {
+    return 0;
+  }
+  const lastIndex = intervals.length - 1;
+  if (target >= intervals[lastIndex].start.getTime()) {
+    return lastIndex;
+  }
+
+  for (let i = 0; i < intervals.length - 1; i += 1) {
+    const currentTs = intervals[i].start.getTime();
+    const nextTs = intervals[i + 1].start.getTime();
+    if (target >= currentTs && target <= nextTs) {
+      return Math.abs(target - currentTs) <= Math.abs(nextTs - target) ? i : i + 1;
+    }
+  }
+
+  return 0;
+}
+
+function updateTimeThermometerFill() {
+  if (!dom.timeThermometerFill || !dom.timeThermometerFrom || !dom.timeThermometerTo) {
+    return;
+  }
+  const max = Number.parseInt(dom.timeThermometerFrom.max || "0", 10);
+  if (!Number.isFinite(max) || max <= 0) {
+    dom.timeThermometerFill.style.left = "0%";
+    dom.timeThermometerFill.style.width = "100%";
+    return;
+  }
+  const fromValue = Number.parseInt(dom.timeThermometerFrom.value || "0", 10);
+  const toValue = Number.parseInt(dom.timeThermometerTo.value || String(max), 10);
+  const left = (Math.min(fromValue, toValue) / max) * 100;
+  const right = (Math.max(fromValue, toValue) / max) * 100;
+  dom.timeThermometerFill.style.left = `${left}%`;
+  dom.timeThermometerFill.style.width = `${Math.max(1, right - left)}%`;
+}
+
+function syncTimeThermometerFromInputs() {
+  if (!gData || !dom.timeThermometerFrom || !dom.timeThermometerTo) {
+    return;
+  }
+  const maxIndex = Math.max(0, gData.intervals.length - 1);
+  dom.timeThermometerFrom.min = "0";
+  dom.timeThermometerTo.min = "0";
+  dom.timeThermometerFrom.max = String(maxIndex);
+  dom.timeThermometerTo.max = String(maxIndex);
+
+  if (dom.timeThermometerMinLabel && dom.timeThermometerMaxLabel) {
+    const bounds = getTimeFilterBounds();
+    if (bounds) {
+      dom.timeThermometerMinLabel.textContent = printDate(bounds.minDate);
+      dom.timeThermometerMaxLabel.textContent = printDate(bounds.maxDate);
+    }
+  }
+
+  const fromDate = dom.filterDateFrom ? parseDatetimeLocalValue(dom.filterDateFrom.value) : null;
+  const toDate = dom.filterDateTo ? parseDatetimeLocalValue(dom.filterDateTo.value) : null;
+  const fromIndex = getNearestIntervalIndex(fromDate || gData.dateFrom);
+  const toIndex = getNearestIntervalIndex(toDate || (gData.intervals[maxIndex] ? gData.intervals[maxIndex].start : gData.dateFrom));
+
+  dom.timeThermometerFrom.value = String(Math.min(fromIndex, toIndex));
+  dom.timeThermometerTo.value = String(Math.max(fromIndex, toIndex));
+  updateTimeThermometerFill();
+}
+
+function applyThermometerToDateInputs() {
+  if (!gData || !dom.timeThermometerFrom || !dom.timeThermometerTo || !dom.filterDateFrom || !dom.filterDateTo) {
+    return;
+  }
+  if (gData.intervals.length === 0) {
+    dom.filterDateFrom.value = toDatetimeLocalValue(gData.dateFrom);
+    dom.filterDateTo.value = toDatetimeLocalValue(gData.dateFrom);
+    updateTimeThermometerFill();
+    return;
+  }
+
+  let fromIndex = Number.parseInt(dom.timeThermometerFrom.value || "0", 10);
+  let toIndex = Number.parseInt(dom.timeThermometerTo.value || "0", 10);
+  if (fromIndex > toIndex) {
+    const tmp = fromIndex;
+    fromIndex = toIndex;
+    toIndex = tmp;
+  }
+
+  dom.timeThermometerFrom.value = String(fromIndex);
+  dom.timeThermometerTo.value = String(toIndex);
+  dom.filterDateFrom.value = toDatetimeLocalValue(gData.intervals[fromIndex].start);
+  dom.filterDateTo.value = toDatetimeLocalValue(gData.intervals[toIndex].start);
+  updateTimeThermometerFill();
 }
 
 function renderSharingPage(data) {
@@ -1897,6 +2147,7 @@ function applyTimeFilterAndRender() {
   if (dom.filterDateTo) {
     dom.filterDateTo.value = toDatetimeLocalValue(toDate);
   }
+  syncTimeThermometerFromInputs();
 
   gFilteredData = buildFilteredData(gData, fromDate, toDate);
 
@@ -1989,7 +2240,14 @@ function onDataLoaded(data) {
 }
 
 async function readFileAsText(file) {
-  return await file.text();
+  const buffer = await file.arrayBuffer();
+
+  // UTF-8 first (strict). If bytes are not valid UTF-8, fall back to Windows-1250 for Czech CSV exports.
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder("windows-1250").decode(buffer);
+  }
 }
 
 dom.uploadCsv.addEventListener("change", async () => {
@@ -2017,6 +2275,20 @@ if (dom.filterDateFrom) {
 
 if (dom.filterDateTo) {
   dom.filterDateTo.addEventListener("change", () => {
+    applyTimeFilterAndRender();
+  });
+}
+
+if (dom.timeThermometerFrom) {
+  dom.timeThermometerFrom.addEventListener("input", () => {
+    applyThermometerToDateInputs();
+    applyTimeFilterAndRender();
+  });
+}
+
+if (dom.timeThermometerTo) {
+  dom.timeThermometerTo.addEventListener("input", () => {
+    applyThermometerToDateInputs();
     applyTimeFilterAndRender();
   });
 }
