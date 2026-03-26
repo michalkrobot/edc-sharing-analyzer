@@ -1,0 +1,19 @@
+{
+  "name": "edc-auth-backend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "nodemailer": "^6.9.16",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  }
+}

@@ -35,10 +35,7 @@
         <p class="hero-text">
           Nahráj CSV report a hned uvidíš skutečné sdílení z dat. Tato stránka nepoužívá simulaci ani optimalizaci.
         </p>
-        <nav class="page-nav">
-          <a href="multi-ean-sharing.html" class="nav-link is-active">Zobrazení sdílení</a>
-          <a href="multi-ean-analyzer.html" class="nav-link">Simulace</a>
-        </nav>
+        <div id="pageNavMount"></div>
         <section class="sharing-hero-strip" aria-label="Hlavní přínosy přehledu sdílení">
           <article class="sharing-hero-strip-card">
             <span class="sharing-hero-strip-label">Rychlý audit</span>
@@ -225,6 +222,8 @@
     </main>
 
     <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script defer src="auth-config.js"></script>
+    <script defer src="auth-client.js"></script>
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
 </html>

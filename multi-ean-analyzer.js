@@ -48,6 +48,8 @@ const dom = {
 };
 
 const pageMode = document.body.dataset.page || "simulation";
+const isSharingLikePage = pageMode === "sharing" || pageMode === "member-sharing";
+const isMemberSharingPage = pageMode === "member-sharing";
 
 const DEFAULT_EAN_LABELS = {
   "859182400501380873": "Janderka RD Benkov spotr.",
@@ -96,6 +98,7 @@ let gFilteredData = null;
 let gLastResult = null;
 let gEanLabelMap = new Map(Object.entries(DEFAULT_EAN_LABELS));
 let gSelectedProducerName = null;
+let gMemberScope = null;
 let gExpandedConsumerNames = new Set();
 let gExpandedProducerNames = new Set();
 let gProducerSearch = "";
@@ -373,6 +376,12 @@ async function loadEanLabelsFromDb() {
 }
 
 async function loadEanLabelMap() {
+  if (isMemberSharingPage) {
+    gEanLabelMap = new Map();
+    updateEanLabelsStatus();
+    return;
+  }
+
   try {
     const resp = await fetch("eany.csv", { cache: "no-store" });
     if (resp.ok) {
@@ -440,7 +449,7 @@ async function handleEanLabelsUpload(file) {
 
     if (gData) {
       renderSummary(gData);
-      if (pageMode === "sharing") {
+      if (isSharingLikePage) {
         renderCurrentView();
       }
     }
@@ -695,20 +704,56 @@ function fmtNum(n) {
   return Number.isFinite(n) ? n.toFixed(2) : "0.00";
 }
 
+function getMemberOwnedProducerCount() {
+  if (!isMemberSharingPage || !gMemberScope || !Array.isArray(gMemberScope.ownProducers)) {
+    return 0;
+  }
+  return gMemberScope.ownProducers.length;
+}
+
+function getMemberOwnedConsumerCount() {
+  if (!isMemberSharingPage || !gMemberScope || !Array.isArray(gMemberScope.ownConsumers)) {
+    return 0;
+  }
+  return gMemberScope.ownConsumers.length;
+}
+
 function renderMeta(data) {
+  if (!dom.metaSection) {
+    return;
+  }
+
   dom.metaSection.hidden = false;
-  dom.metaFilename.textContent = data.filename;
-  dom.metaFrom.textContent = printDate(data.dateFrom);
-  dom.metaTo.textContent = printDate(data.dateTo);
-  dom.metaIntervals.textContent = String(data.intervals.length);
-  dom.metaProducers.textContent = String(data.producers.length);
-  dom.metaConsumers.textContent = String(data.consumers.length);
+  if (dom.metaFilename) {
+    dom.metaFilename.textContent = data.filename;
+  }
+  if (dom.metaFrom) {
+    dom.metaFrom.textContent = printDate(data.dateFrom);
+  }
+  if (dom.metaTo) {
+    dom.metaTo.textContent = printDate(data.dateTo);
+  }
+  if (dom.metaIntervals) {
+    dom.metaIntervals.textContent = String(data.intervals.length);
+  }
+  if (dom.metaProducers) {
+    dom.metaProducers.textContent = String(data.producers.length);
+  }
+  if (dom.metaConsumers) {
+    dom.metaConsumers.textContent = String(data.consumers.length);
+  }
 }
 
 function renderSummary(data) {
   const { producerStats, consumerStats } = aggregateSummary(data);
+  const ownProducerSet = isMemberSharingPage && gMemberScope && Array.isArray(gMemberScope.ownProducers)
+    ? new Set(gMemberScope.ownProducers)
+    : null;
+  const ownConsumerSet = isMemberSharingPage && gMemberScope && Array.isArray(gMemberScope.ownConsumers)
+    ? new Set(gMemberScope.ownConsumers)
+    : null;
   const producerAllocations = computeProducerConsumerAllocations(data);
-  const selectedProducerAllocations = pageMode === "sharing" && gSelectedProducerName
+  const selectedProducerAllocations = isSharingLikePage && gSelectedProducerName
     ? producerAllocations.find((producer) => producer.name === gSelectedProducerName) || null
     : null;
   const consumerBreakdownMap = new Map();
@@ -763,6 +808,7 @@ function renderSummary(data) {
       label: displayEan(producer.name),
       shared: Math.max(0, producer.before - producer.after),
     }))
+    .filter((producer) => !ownProducerSet || ownProducerSet.has(producer.name))
     .filter((producer) => matchesSummarySearch(producer.name, gProducerSearch))
     .sort((a, b) => compareValues(a[gProducerSort.key], b[gProducerSort.key], gProducerSort.direction));
 
@@ -838,9 +884,13 @@ function renderSummary(data) {
   const producerConsumerShares = selectedProducerAllocations
     ? producerConsumerShareMap.get(gSelectedProducerName) || new Map()
     : null;
-  const filteredConsumers = (producerConsumerShares
-    ? consumerStats.filter((consumer) => producerConsumerShares.has(consumer.name))
-    : consumerStats)
+  const baseConsumers = producerConsumerShares
+    ? consumerStats
+      .filter((consumer) => producerConsumerShares.has(consumer.name))
+      .filter((consumer) => !ownConsumerSet || ownConsumerSet.has(consumer.name))
+    : (ownConsumerSet ? consumerStats.filter((consumer) => ownConsumerSet.has(consumer.name)) : consumerStats);
+
+  const filteredConsumers = baseConsumers
     .map((consumer) => ({
       ...consumer,
       label: displayEan(consumer.name),
@@ -915,7 +965,7 @@ function renderSummary(data) {
   if (dom.consumerFilterStatus) {
     dom.consumerFilterStatus.textContent = gSelectedProducerName
       ? `Filtr odběrných EAN pro výrobnu: ${displayEan(gSelectedProducerName)}`
-      : "Zobrazeny jsou všechny odběrné EAN.";
+      : (isMemberSharingPage ? "Zobrazeny jsou tvoje odběrné EAN." : "Zobrazeny jsou všechny odběrné EAN.");
   }
   if (dom.clearProducerFilterBtn) {
     dom.clearProducerFilterBtn.hidden = !gSelectedProducerName;
@@ -1536,11 +1586,17 @@ function renderProducerPieCharts(producerStats) {
   
   container.innerHTML = "";
   let renderedCharts = 0;
+  const ownProducerSet = isMemberSharingPage && gMemberScope && Array.isArray(gMemberScope.ownProducers)
+    ? new Set(gMemberScope.ownProducers)
+    : null;
   
   const colors = ["#10b981", "#ef4444", "#f59e0b"];
   const labels = ["Sdílení", "Ušlá příl.", "Zůstatek"];
   
   for (const producer of producerStats) {
+    if (ownProducerSet && !ownProducerSet.has(producer.name)) {
+      continue;
+    }
     const shared = Math.max(0, producer.before - producer.after);
     const missed = Math.max(0, producer.missed);
     const remainder = Math.max(0, producer.after - producer.missed);
@@ -1591,6 +1647,12 @@ const CONSUMER_COLORS = [
   "#059669", "#0284c7", "#c026d3", "#ca8a04", "#15803d",
 ];
 
+const PRODUCER_COLORS = [
+  "#2563eb", "#10b981", "#f59e0b", "#7c3aed", "#ef4444",
+  "#0891b2", "#9333ea", "#dc2626", "#ca8a04", "#059669",
+  "#0284c7", "#b45309", "#4f46e5", "#c026d3", "#15803d",
+];
+
 function computeProducerConsumerAllocations(data) {
   const result = data.producers.map((p) => ({
     name: p.name,
@@ -1621,12 +1683,28 @@ function renderProducerConsumerPieCharts(data) {
   const section = document.getElementById("producerConsumerPieChartsSection");
   if (!container || !section) return;
 
+  const memberOwnProducerCount = isMemberSharingPage && gMemberScope && Array.isArray(gMemberScope.ownProducers)
+    ? gMemberScope.ownProducers.length
+    : 0;
+
+  if (isMemberSharingPage && memberOwnProducerCount === 0) {
+    section.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
   container.innerHTML = "";
   let renderedCharts = 0;
+  const ownProducerSet = isMemberSharingPage && gMemberScope && Array.isArray(gMemberScope.ownProducers)
+    ? new Set(gMemberScope.ownProducers)
+    : null;
 
   const allocations = computeProducerConsumerAllocations(data);
 
   for (const producer of allocations) {
+    if (ownProducerSet && !ownProducerSet.has(producer.name)) {
+      continue;
+    }
     const totalShared = producer.consumerAllocations.reduce((s, ca) => s + ca.shared, 0);
     if (totalShared < 0.001) continue;
 
@@ -1681,6 +1759,121 @@ function renderProducerConsumerPieCharts(data) {
   }
 }
 
+function computeConsumerProducerAllocations(data) {
+  const result = data.consumers.map((consumer) => ({
+    name: consumer.name,
+    producerAllocations: data.producers.map((producer) => ({ name: producer.name, shared: 0 })),
+  }));
+
+  for (const interval of data.intervals) {
+    const totalConsumerReceived = interval.consumers.reduce(
+      (sumValue, consumer) => sumValue + Math.max(0, consumer.before - consumer.after),
+      0,
+    );
+    if (totalConsumerReceived < 0.001) {
+      continue;
+    }
+
+    for (let producerIndex = 0; producerIndex < interval.producers.length; producerIndex += 1) {
+      const producerShared = Math.max(0, interval.producers[producerIndex].before - interval.producers[producerIndex].after);
+      if (producerShared < 0.001) {
+        continue;
+      }
+
+      for (let consumerIndex = 0; consumerIndex < interval.consumers.length; consumerIndex += 1) {
+        const consumerReceived = Math.max(0, interval.consumers[consumerIndex].before - interval.consumers[consumerIndex].after);
+        if (consumerReceived < 0.001) {
+          continue;
+        }
+
+        result[consumerIndex].producerAllocations[producerIndex].shared += producerShared * (consumerReceived / totalConsumerReceived);
+      }
+    }
+  }
+
+  return result;
+}
+
+function renderConsumerProducerPieCharts(data) {
+  const container = document.getElementById("consumerProducerPieCharts");
+  const section = document.getElementById("consumerProducerPieChartsSection");
+  if (!container || !section) return;
+
+  const isMemberWithConsumers = isMemberSharingPage && getMemberOwnedConsumerCount() > 0;
+  if (!isMemberWithConsumers) {
+    section.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = "";
+  let renderedCharts = 0;
+  const ownConsumerSet = isMemberSharingPage && gMemberScope && Array.isArray(gMemberScope.ownConsumers)
+    ? new Set(gMemberScope.ownConsumers)
+    : null;
+
+  const allocations = computeConsumerProducerAllocations(data);
+
+  for (const consumer of allocations) {
+    if (ownConsumerSet && !ownConsumerSet.has(consumer.name)) {
+      continue;
+    }
+
+    const totalShared = consumer.producerAllocations.reduce((sumValue, allocation) => sumValue + allocation.shared, 0);
+    if (totalShared < 0.001) {
+      continue;
+    }
+
+    const mainItems = [];
+    let othersKwh = 0;
+    for (let i = 0; i < consumer.producerAllocations.length; i += 1) {
+      const allocation = consumer.producerAllocations[i];
+      if (allocation.shared / totalShared >= 0.05) {
+        mainItems.push({ name: allocation.name, shared: allocation.shared, colorIndex: i });
+      } else {
+        othersKwh += allocation.shared;
+      }
+    }
+    if (othersKwh > 0.001) {
+      mainItems.push({ name: null, shared: othersKwh, colorIndex: -1 });
+    }
+
+    const values = mainItems.map((item) => item.shared);
+    const colors = mainItems.map((item) => item.colorIndex >= 0 ? PRODUCER_COLORS[item.colorIndex % PRODUCER_COLORS.length] : "#9ca3af");
+    const labels = mainItems.map((item) => item.name ? displayEan(item.name) : "Ostatní");
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "pie-chart-container";
+
+    const h3 = document.createElement("h3");
+    h3.textContent = displayEan(consumer.name);
+    wrapper.appendChild(h3);
+
+    const canvas = document.createElement("div");
+    canvas.className = "pie-chart-canvas";
+    wrapper.appendChild(canvas);
+
+    const statsDiv = document.createElement("div");
+    statsDiv.style.cssText = "font-size: 10px; color: #5f6d5c; margin-top: 0.4rem; line-height: 1.3;";
+    statsDiv.innerHTML = mainItems
+      .map((item, i) => `<div><span style="color: ${colors[i]}">●</span> ${item.name ? displayEan(item.name) : "Ostatní"}: ${item.shared.toFixed(1)} kWh</div>`)
+      .join("");
+    wrapper.appendChild(statsDiv);
+
+    container.appendChild(wrapper);
+
+    drawPieChart(canvas, values, colors, labels, null);
+    renderedCharts += 1;
+  }
+
+  if (renderedCharts === 0) {
+    section.hidden = true;
+    container.innerHTML = "";
+  } else {
+    section.hidden = false;
+  }
+}
+
 function computeAverageDay(intervals) {
   // Bucket structure: key = "HH:MM", value = accumulated sums
   const buckets = new Map();
@@ -1713,9 +1906,98 @@ function computeAverageDay(intervals) {
   return sorted;
 }
 
-function drawAverageDayChart(canvas, points, showConsumption, tooltip) {
-  const series = [
-    {
+function getChartIntervalsForCurrentMode(data, scopeMode = "auto") {
+  if (!isMemberSharingPage || !gMemberScope) {
+    return data.intervals;
+  }
+
+  const ownProducerSet = new Set(
+    (Array.isArray(gMemberScope.ownProducers) ? gMemberScope.ownProducers : [])
+      .map((value) => normalizeEan(value))
+      .filter(Boolean),
+  );
+  const ownConsumerSet = new Set(
+    (Array.isArray(gMemberScope.ownConsumers) ? gMemberScope.ownConsumers : [])
+      .map((value) => normalizeEan(value))
+      .filter(Boolean),
+  );
+
+  const ownProducerIndexes = data.producers
+    .map((producer, index) => ({ name: normalizeEan(producer.name), index }))
+    .filter((item) => ownProducerSet.has(item.name))
+    .map((item) => item.index);
+
+  const ownConsumerIndexes = data.consumers
+    .map((consumer, index) => ({ name: normalizeEan(consumer.name), index }))
+    .filter((item) => ownConsumerSet.has(item.name))
+    .map((item) => item.index);
+
+  let chartConsumerIndexes = ownConsumerIndexes;
+
+  // For owner-producer view, chart consumption should aggregate all consumers linked to any owned producer.
+  if (scopeMode !== "consumer" && ownProducerIndexes.length > 0) {
+    const allocations = computeProducerConsumerAllocations(data);
+    const linkedConsumerSet = new Set();
+
+    for (const producerIndex of ownProducerIndexes) {
+      const producerAllocation = allocations[producerIndex];
+      if (!producerAllocation || !Array.isArray(producerAllocation.consumerAllocations)) {
+        continue;
+      }
+
+      producerAllocation.consumerAllocations.forEach((allocation, consumerIndex) => {
+        if ((Number(allocation.shared) || 0) > 0.001) {
+          linkedConsumerSet.add(consumerIndex);
+        }
+      });
+    }
+
+    chartConsumerIndexes = Array.from(linkedConsumerSet).sort((a, b) => a - b);
+  }
+
+  return data.intervals.map((interval) => {
+    const producers = Array.isArray(interval.producers) ? interval.producers : [];
+    const consumers = Array.isArray(interval.consumers) ? interval.consumers : [];
+
+    const ownProductionBefore = ownProducerIndexes.reduce((sumValue, idx) => sumValue + (Number(producers[idx] && producers[idx].before) || 0), 0);
+    const ownProductionAfter = ownProducerIndexes.reduce((sumValue, idx) => sumValue + (Number(producers[idx] && producers[idx].after) || 0), 0);
+    const ownConsumptionBefore = chartConsumerIndexes.reduce((sumValue, idx) => sumValue + (Number(consumers[idx] && consumers[idx].before) || 0), 0);
+    const ownConsumptionAfter = chartConsumerIndexes.reduce((sumValue, idx) => sumValue + (Number(consumers[idx] && consumers[idx].after) || 0), 0);
+
+    const sharedByOwnProducers = Math.max(0, ownProductionBefore - ownProductionAfter);
+    const sharedByOwnConsumers = Math.max(0, ownConsumptionBefore - ownConsumptionAfter);
+    const intervalSharing = ownProducerIndexes.length > 0
+      ? Math.min(sharedByOwnProducers, sharedByOwnConsumers)
+      : sharedByOwnConsumers;
+
+    return {
+      start: interval.start,
+      sumProduction: ownProductionBefore,
+      sumSharing: intervalSharing,
+      consumers: [{ before: ownConsumptionBefore }],
+    };
+  });
+}
+
+function drawAverageDayChart(canvas, points, showConsumptionOrOptions, tooltip) {
+  let showProduction = true;
+  let showConsumption = false;
+
+  if (
+    showConsumptionOrOptions
+    && typeof showConsumptionOrOptions === "object"
+    && !Array.isArray(showConsumptionOrOptions)
+  ) {
+    showProduction = showConsumptionOrOptions.showProduction !== false;
+    showConsumption = Boolean(showConsumptionOrOptions.showConsumption);
+  } else {
+    showConsumption = Boolean(showConsumptionOrOptions);
+  }
+
+  const series = [];
+
+  if (showProduction) {
+    series.push({
       name: "Výroba",
       type: "line",
       data: points.map((p) => p.production),
@@ -1724,8 +2006,8 @@ function drawAverageDayChart(canvas, points, showConsumption, tooltip) {
       symbolSize: 5,
       lineStyle: { width: 2.4, color: "#2563eb" },
       itemStyle: { color: "#2563eb" },
-    },
-  ];
+    });
+  }
 
   if (showConsumption) {
     series.push({
@@ -1800,7 +2082,13 @@ function drawAverageDayChart(canvas, points, showConsumption, tooltip) {
   }));
 }
 
-function computeBestDay(intervals) {
+function computeBestDay(intervals, options) {
+  const mode = options && options.mode === "production"
+    ? "production"
+    : options && options.mode === "consumption"
+      ? "consumption"
+      : "sharing";
+
   // Group intervals by date string (YYYY-MM-DD)
   const days = new Map();
   for (const interval of intervals) {
@@ -1810,20 +2098,32 @@ function computeBestDay(intervals) {
     days.get(key).push(interval);
   }
 
-  // Find the day with the highest total sharing
+  // Find the day with the selected metric
   let bestKey = null;
-  let bestSharing = -1;
+  let bestMetric = -1;
   for (const [key, dayIntervals] of days) {
+    const totalProduction = dayIntervals.reduce((s, iv) => s + iv.sumProduction, 0);
     const totalSharing = dayIntervals.reduce((s, iv) => s + iv.sumSharing, 0);
-    if (totalSharing > bestSharing) {
-      bestSharing = totalSharing;
+    const totalConsumption = dayIntervals.reduce(
+      (s, iv) => s + iv.consumers.reduce((consSum, c) => consSum + (Number(c.before) || 0), 0),
+      0,
+    );
+    const metric = mode === "production"
+      ? totalProduction
+      : mode === "consumption"
+        ? totalConsumption
+        : totalSharing;
+    if (metric > bestMetric) {
+      bestMetric = metric;
       bestKey = key;
     }
   }
 
-  if (!bestKey) return { date: null, points: [] };
+  if (!bestKey) return { date: null, points: [], totalProduction: 0, totalSharing: 0 };
 
   const dayIntervals = days.get(bestKey);
+  const totalProduction = dayIntervals.reduce((s, iv) => s + iv.sumProduction, 0);
+  const totalSharing = dayIntervals.reduce((s, iv) => s + iv.sumSharing, 0);
   const points = dayIntervals
     .map((iv) => {
       const h = iv.start.getHours().toString().padStart(2, "0");
@@ -1841,17 +2141,83 @@ function computeBestDay(intervals) {
   const [y, mo, dd] = bestKey.split("-");
   const dateLabel = `${parseInt(dd, 10)}.${parseInt(mo, 10)}.${y}`;
 
-  return { date: dateLabel, points };
+  return { date: dateLabel, points, totalProduction, totalSharing };
 }
 
-function renderBestDayChart(data) {
-  const canvas = document.getElementById("bestDayChart");
-  const section = document.getElementById("bestDaySection");
-  const title = document.getElementById("bestDayTitle");
-  const toggle = document.getElementById("bestDayShowConsumption");
-  if (!canvas || !section) return;
+function computeDailyConsumerTotals(intervals) {
+  const days = new Map();
 
-  const { date, points } = computeBestDay(data.intervals);
+  for (const interval of intervals) {
+    const d = interval.start;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    if (!days.has(key)) {
+      days.set(key, { key, consumption: 0, shared: 0 });
+    }
+
+    const bucket = days.get(key);
+    const consumption = interval.consumers.reduce((sumValue, consumer) => sumValue + (Number(consumer.before) || 0), 0);
+    bucket.consumption += consumption;
+    bucket.shared += Number(interval.sumSharing) || 0;
+  }
+
+  return Array.from(days.values())
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((day) => {
+      const [year, month, date] = day.key.split("-");
+      return {
+        label: `${Number.parseInt(date, 10)}.${Number.parseInt(month, 10)}.`,
+        consumption: day.consumption,
+        shared: day.shared,
+      };
+    });
+}
+
+function computeDailyProducerTotals(intervals) {
+  const days = new Map();
+
+  for (const interval of intervals) {
+    const d = interval.start;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    if (!days.has(key)) {
+      days.set(key, { key, production: 0, shared: 0 });
+    }
+
+    const bucket = days.get(key);
+    bucket.production += Number(interval.sumProduction) || 0;
+    bucket.shared += Number(interval.sumSharing) || 0;
+  }
+
+  return Array.from(days.values())
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((day) => {
+      const [year, month, date] = day.key.split("-");
+      return {
+        label: `${Number.parseInt(date, 10)}.${Number.parseInt(month, 10)}.`,
+        production: day.production,
+        shared: day.shared,
+      };
+    });
+}
+
+function renderProducerDailyTotalsChart(data) {
+  const canvas = document.getElementById("producerDailyTotalsChart");
+  const section = document.getElementById("producerDailyTotalsSection");
+  const description = section ? section.querySelector(".section-description") : null;
+  if (!canvas || !section) {
+    return;
+  }
+
+  const isMemberWithProducers = isMemberSharingPage && getMemberOwnedProducerCount() > 0;
+  if (!isMemberWithProducers) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  const chartIntervals = getChartIntervalsForCurrentMode(data);
+  const points = computeDailyProducerTotals(chartIntervals);
   if (!points.length) {
     section.hidden = true;
     destroyChartForElement(canvas);
@@ -1860,9 +2226,240 @@ function renderBestDayChart(data) {
 
   section.hidden = false;
 
-  if (title && date) title.textContent = `Nejlepší den – ${date}`;
+  const totalProduction = points.reduce((sumValue, point) => sumValue + point.production, 0);
+  const totalShared = points.reduce((sumValue, point) => sumValue + point.shared, 0);
+  const remainderValues = points.map((point) => Math.max(0, point.production - point.shared));
+
+  if (description) {
+    description.textContent = `Součet za období: výroba ${fmt(totalProduction)} | sdílení ${fmt(totalShared)}. Denní sloupce jsou skládané do jedné celkové výroby.`;
+  }
+
+  createChartForCanvas(canvas, withEchartTheme({
+    animationDuration: 450,
+    tooltip: {
+      ...buildEchartTooltip(),
+      trigger: "axis",
+      formatter: (params) => {
+        if (!params.length) return "";
+        const lines = [`<strong>${params[0].axisValueLabel}</strong>`];
+        const total = params.reduce((sumValue, item) => sumValue + (Number(item.value) || 0), 0);
+        for (const p of params) {
+          lines.push(`${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(2)} kWh`);
+        }
+        lines.push(`<strong>Celkem výroba: ${total.toFixed(2)} kWh</strong>`);
+        return lines.join("<br/>");
+      },
+    },
+    legend: {
+      right: 10,
+      top: 14,
+      orient: "vertical",
+      textStyle: { color: "#20301e", fontFamily: "Space Grotesk, sans-serif" },
+    },
+    grid: {
+      left: 58,
+      right: 170,
+      top: 26,
+      bottom: 56,
+    },
+    xAxis: {
+      type: "category",
+      data: points.map((point) => point.label),
+      axisLabel: {
+        color: "#20301e",
+        interval: Math.max(0, Math.floor(points.length / 12)),
+      },
+      axisLine: { lineStyle: { color: "#ced8c9" } },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      name: "kWh",
+      axisLabel: {
+        color: "#4f5f4c",
+        formatter: (value) => Number(value).toFixed(2),
+      },
+      splitLine: { lineStyle: { color: "#dce5d8" } },
+    },
+    series: [
+      {
+        name: "Nesdílená výroba",
+        type: "bar",
+        stack: "daily-production",
+        data: remainderValues,
+        barMaxWidth: 30,
+        itemStyle: { color: "#2563eb" },
+      },
+      {
+        name: "Sdílení",
+        type: "bar",
+        stack: "daily-production",
+        data: points.map((point) => point.shared),
+        barMaxWidth: 30,
+        itemStyle: { color: "#10b981" },
+      },
+    ],
+  }));
+}
+
+function renderConsumerDailyTotalsChart(data) {
+  const canvas = document.getElementById("consumerDailyTotalsChart");
+  const section = document.getElementById("consumerDailyTotalsSection");
+  const description = section ? section.querySelector(".section-description") : null;
+  if (!canvas || !section) {
+    return;
+  }
+
+  const isMemberWithConsumers = isMemberSharingPage && getMemberOwnedConsumerCount() > 0;
+  if (!isMemberWithConsumers) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  const chartIntervals = getChartIntervalsForCurrentMode(data, "consumer");
+  const points = computeDailyConsumerTotals(chartIntervals);
+  if (!points.length) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  section.hidden = false;
+
+  const totalConsumption = points.reduce((sumValue, point) => sumValue + point.consumption, 0);
+  const totalShared = points.reduce((sumValue, point) => sumValue + point.shared, 0);
+  const nonSharedValues = points.map((point) => Math.max(0, point.consumption - point.shared));
+
+  if (description) {
+    description.textContent = `Součet za období: spotřeba ${fmt(totalConsumption)} | sdílení ${fmt(totalShared)}. Denní sloupce jsou skládané do jedné celkové spotřeby.`;
+  }
+
+  createChartForCanvas(canvas, withEchartTheme({
+    animationDuration: 450,
+    tooltip: {
+      ...buildEchartTooltip(),
+      trigger: "axis",
+      formatter: (params) => {
+        if (!params.length) return "";
+        const lines = [`<strong>${params[0].axisValueLabel}</strong>`];
+        const total = params.reduce((sumValue, item) => sumValue + (Number(item.value) || 0), 0);
+        for (const p of params) {
+          lines.push(`${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(2)} kWh`);
+        }
+        lines.push(`<strong>Celkem spotřeba: ${total.toFixed(2)} kWh</strong>`);
+        return lines.join("<br/>");
+      },
+    },
+    legend: {
+      right: 10,
+      top: 14,
+      orient: "vertical",
+      textStyle: { color: "#20301e", fontFamily: "Space Grotesk, sans-serif" },
+    },
+    grid: {
+      left: 58,
+      right: 170,
+      top: 26,
+      bottom: 56,
+    },
+    xAxis: {
+      type: "category",
+      data: points.map((point) => point.label),
+      axisLabel: {
+        color: "#20301e",
+        interval: Math.max(0, Math.floor(points.length / 12)),
+      },
+      axisLine: { lineStyle: { color: "#ced8c9" } },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      name: "kWh",
+      axisLabel: {
+        color: "#4f5f4c",
+        formatter: (value) => Number(value).toFixed(2),
+      },
+      splitLine: { lineStyle: { color: "#dce5d8" } },
+    },
+    series: [
+      {
+        name: "Nesdílená spotřeba",
+        type: "bar",
+        stack: "daily-consumption",
+        data: nonSharedValues,
+        barMaxWidth: 30,
+        itemStyle: { color: "#f59e0b" },
+      },
+      {
+        name: "Sdílení",
+        type: "bar",
+        stack: "daily-consumption",
+        data: points.map((point) => point.shared),
+        barMaxWidth: 30,
+        itemStyle: { color: "#10b981" },
+      },
+    ],
+  }));
+}
+
+function renderBestDayChart(data) {
+  const canvas = document.getElementById("bestDayChart");
+  const section = document.getElementById("bestDaySection");
+  const title = document.getElementById("bestDayTitle");
+  const description = section ? section.querySelector(".section-description") : null;
+  const toggle = document.getElementById("bestDayShowConsumption");
+  const controls = section ? section.querySelector(".chart-controls") : null;
+  if (!canvas || !section) return;
+
+  const memberOwnProducerCount = getMemberOwnedProducerCount();
+  const isMemberWithoutProducers = isMemberSharingPage && memberOwnProducerCount === 0;
+  if (isMemberWithoutProducers) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  const chartIntervals = getChartIntervalsForCurrentMode(data);
+  const bestDayMode = isMemberSharingPage ? "production" : "sharing";
+  const { date, points, totalProduction } = computeBestDay(chartIntervals, { mode: bestDayMode });
+  if (!points.length) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  section.hidden = false;
+
+  if (title && date) {
+    if (isMemberSharingPage) {
+      title.textContent = `Výrobny - Nejlepší den – ${date}`;
+    } else {
+      title.textContent = `Nejlepší den – ${date}`;
+    }
+  }
+
+  if (description) {
+    if (isMemberSharingPage) {
+      const totalSharing = points.reduce((sumValue, point) => sumValue + point.shared, 0);
+      description.textContent = `Souhrn dne výroben: výroba ${fmt(totalProduction)} | sdílení ${fmt(totalSharing)}.`;
+    } else {
+      description.textContent = "Den s nejvyšším celkovým sdílením.";
+    }
+  }
+
+  if (controls) {
+    controls.hidden = isMemberSharingPage;
+  }
 
   const redraw = () => {
+    if (isMemberSharingPage) {
+      drawAverageDayChart(canvas, points, {
+        showProduction: true,
+        showConsumption: false,
+      }, null);
+      return;
+    }
     const showConsumption = toggle ? toggle.checked : true;
     drawAverageDayChart(canvas, points, showConsumption, null);
   };
@@ -1876,13 +2473,22 @@ function renderBestDayChart(data) {
   redraw();
 }
 
-function renderAverageDayChart(data) {
-  const canvas = document.getElementById("averageDayChart");
-  const section = document.getElementById("averageDaySection");
-  const toggle = document.getElementById("avgDayShowConsumption");
+function renderConsumerBestDayChart(data) {
+  const canvas = document.getElementById("consumerBestDayChart");
+  const section = document.getElementById("consumerBestDaySection");
+  const title = document.getElementById("consumerBestDayTitle");
+  const description = section ? section.querySelector(".section-description") : null;
   if (!canvas || !section) return;
 
-  const points = computeAverageDay(data.intervals);
+  const isMemberWithConsumers = isMemberSharingPage && getMemberOwnedConsumerCount() > 0;
+  if (!isMemberWithConsumers) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  const chartIntervals = getChartIntervalsForCurrentMode(data, "consumer");
+  const { date, points } = computeBestDay(chartIntervals, { mode: "sharing" });
   if (!points.length) {
     section.hidden = true;
     destroyChartForElement(canvas);
@@ -1891,7 +2497,75 @@ function renderAverageDayChart(data) {
 
   section.hidden = false;
 
+  if (title && date) {
+    title.textContent = `Odběry - Nejlepší den – ${date}`;
+  }
+
+  if (description) {
+    const totalConsumption = points.reduce((sumValue, point) => sumValue + point.consumption, 0);
+    const totalSharing = points.reduce((sumValue, point) => sumValue + point.shared, 0);
+    description.textContent = `Souhrn dne odběrů: spotřeba ${fmt(totalConsumption)} | sdílení ${fmt(totalSharing)}.`;
+  }
+
+  drawAverageDayChart(canvas, points, {
+    showProduction: false,
+    showConsumption: true,
+  }, null);
+}
+
+function renderAverageDayChart(data) {
+  const canvas = document.getElementById("averageDayChart");
+  const section = document.getElementById("averageDaySection");
+  const description = section ? section.querySelector(".section-description") : null;
+  const toggle = document.getElementById("avgDayShowConsumption");
+  const controls = section ? section.querySelector(".chart-controls") : null;
+  if (!canvas || !section) return;
+
+  const memberOwnProducerCount = getMemberOwnedProducerCount();
+  const isMemberWithoutProducers = isMemberSharingPage && memberOwnProducerCount === 0;
+  if (isMemberWithoutProducers) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  const chartIntervals = getChartIntervalsForCurrentMode(data);
+  const points = computeAverageDay(chartIntervals);
+  if (!points.length) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  section.hidden = false;
+
+  if (description) {
+    if (isMemberSharingPage) {
+      const totalProduction = points.reduce((sumValue, point) => sumValue + point.production, 0);
+      const totalSharing = points.reduce((sumValue, point) => sumValue + point.shared, 0);
+      description.textContent = `Souhrn profilu výroben: výroba ${fmt(totalProduction)} | sdílení ${fmt(totalSharing)}.`;
+    } else {
+      description.textContent = "Průměr přes všechny dny v souboru – výroba, spotřeba a sdílení po 15minutových intervalech.";
+    }
+  }
+
+  const sectionTitle = section ? section.querySelector("h2") : null;
+  if (sectionTitle && isMemberSharingPage) {
+    sectionTitle.textContent = "Výrobny - Průměrný den";
+  }
+
+  if (controls) {
+    controls.hidden = isMemberSharingPage;
+  }
+
   const redraw = () => {
+    if (isMemberSharingPage) {
+      drawAverageDayChart(canvas, points, {
+        showProduction: true,
+        showConsumption: false,
+      }, null);
+      return;
+    }
     const showConsumption = toggle ? toggle.checked : true;
     drawAverageDayChart(canvas, points, showConsumption, null);
   };
@@ -1903,6 +2577,46 @@ function renderAverageDayChart(data) {
   }
 
   redraw();
+}
+
+function renderConsumerAverageDayChart(data) {
+  const canvas = document.getElementById("consumerAverageDayChart");
+  const section = document.getElementById("consumerAverageDaySection");
+  const description = section ? section.querySelector(".section-description") : null;
+  if (!canvas || !section) return;
+
+  const isMemberWithConsumers = isMemberSharingPage && getMemberOwnedConsumerCount() > 0;
+  if (!isMemberWithConsumers) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  const chartIntervals = getChartIntervalsForCurrentMode(data, "consumer");
+  const points = computeAverageDay(chartIntervals);
+  if (!points.length) {
+    section.hidden = true;
+    destroyChartForElement(canvas);
+    return;
+  }
+
+  section.hidden = false;
+
+  if (description) {
+    const totalConsumption = points.reduce((sumValue, point) => sumValue + point.consumption, 0);
+    const totalSharing = points.reduce((sumValue, point) => sumValue + point.shared, 0);
+    description.textContent = `Souhrn profilu odběrů: spotřeba ${fmt(totalConsumption)} | sdílení ${fmt(totalSharing)}.`;
+  }
+
+  const sectionTitle = section ? section.querySelector("h2") : null;
+  if (sectionTitle) {
+    sectionTitle.textContent = "Odběry - Průměrný den";
+  }
+
+  drawAverageDayChart(canvas, points, {
+    showProduction: false,
+    showConsumption: true,
+  }, null);
 }
 
 function makeCsvRow(values) {
@@ -2090,16 +2804,28 @@ function renderSharingPage(data) {
     return;
   }
 
-  dom.sharingSection.hidden = false;
+  if (isMemberSharingPage) {
+    dom.sharingSection.hidden = true;
+    if (dom.producerChart) {
+      destroyChartForElement(dom.producerChart);
+    }
+  } else {
+    dom.sharingSection.hidden = false;
+  }
 
   const { producerStats } = aggregateSummary(data);
-  if (dom.producerChart) {
+  if (dom.producerChart && !isMemberSharingPage) {
     drawProducerOverviewChart(dom.producerChart, producerStats, null);
   }
+  renderProducerDailyTotalsChart(data);
+  renderConsumerDailyTotalsChart(data);
   renderProducerPieCharts(producerStats);
   renderProducerConsumerPieCharts(data);
+  renderConsumerProducerPieCharts(data);
   renderBestDayChart(data);
+  renderConsumerBestDayChart(data);
   renderAverageDayChart(data);
+  renderConsumerAverageDayChart(data);
 
   if (dom.optProgress) {
     dom.optProgress.textContent = data.intervals.length > 0
@@ -2117,13 +2843,13 @@ function renderCurrentView() {
   renderMeta(activeData);
   renderSummary(activeData);
 
-  if (pageMode === "sharing") {
+  if (isSharingLikePage) {
     renderSharingPage(activeData);
   }
 }
 
 function applyTimeFilterAndRender() {
-  if (!gData || pageMode !== "sharing") {
+  if (!gData || !isSharingLikePage) {
     return;
   }
 
@@ -2167,6 +2893,9 @@ function onDataLoaded(data) {
   gFilteredData = null;
   gLastResult = null;
   gSelectedProducerName = null;
+  if (!isMemberSharingPage) {
+    gMemberScope = null;
+  }
   gExpandedConsumerNames = new Set();
   gExpandedProducerNames = new Set();
   gProducerSearch = "";
@@ -2179,7 +2908,9 @@ function onDataLoaded(data) {
   if (dom.consumerSearchInput) {
     dom.consumerSearchInput.value = "";
   }
-  dom.status.textContent = `Nahráno: ${data.filename}`;
+  if (dom.status) {
+    dom.status.textContent = `Nahráno: ${data.filename}`;
+  }
   if (dom.optProgress) {
     dom.optProgress.textContent = "";
   }
@@ -2187,7 +2918,7 @@ function onDataLoaded(data) {
     dom.exportBtn.disabled = true;
   }
 
-  if (pageMode === "sharing") {
+  if (isSharingLikePage) {
     if (dom.timeFilterSection) {
       dom.timeFilterSection.hidden = false;
     }
@@ -2202,7 +2933,7 @@ function onDataLoaded(data) {
     renderAllocationInputs(data);
   }
 
-  // Po nahrání pouze zobraz grafy skutečného sdílení z CSV (bez simulace).
+  // Po nahrání pouze zobraz grafy skutečného sdílení z dat.
   const { producerStats } = aggregateSummary(data);
   if (dom.simulationResult) {
     dom.simulationResult.innerHTML = "";
@@ -2215,7 +2946,7 @@ function onDataLoaded(data) {
   }
 
   if (dom.producerChart) {
-    if (pageMode !== "sharing") {
+    if (!isSharingLikePage) {
       drawBarChart(
         dom.producerChart,
         producerStats.map((p) => displayEan(p.name)),
@@ -2231,12 +2962,104 @@ function onDataLoaded(data) {
   if (dom.timelineChart) {
     drawTimelineChart(dom.timelineChart, [{ label: "0", production: 0, consumption: 0, shared: 0 }], null);
   }
-  if (dom.optProgress && pageMode !== "sharing") {
+  if (dom.optProgress && !isSharingLikePage) {
     dom.optProgress.textContent =
-      pageMode === "sharing"
+      isSharingLikePage
         ? "Zobrazen přehled výroben: sdílení a zůstatek po sdílení. Ušlá příležitost je v detailu po najetí myší."
         : "Zobrazen graf sdílení za výrobny z nahraných dat (bez simulace).";
   }
+}
+
+function hydrateServerSharingData(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Server nevrátil data ve správném formátu.");
+  }
+
+  const producers = Array.isArray(payload.producers) ? payload.producers : [];
+  const consumers = Array.isArray(payload.consumers) ? payload.consumers : [];
+  const intervalsRaw = Array.isArray(payload.intervals) ? payload.intervals : [];
+
+  const intervals = intervalsRaw.map((interval) => ({
+    start: new Date(Number(interval.start) || 0),
+    producers: Array.isArray(interval.producers) ? interval.producers.map((item) => ({
+      before: Number(item.before) || 0,
+      after: Number(item.after) || 0,
+      missed: Number(item.missed) || 0,
+    })) : [],
+    consumers: Array.isArray(interval.consumers) ? interval.consumers.map((item) => ({
+      before: Number(item.before) || 0,
+      after: Number(item.after) || 0,
+      missed: Number(item.missed) || 0,
+    })) : [],
+    sumProduction: Number(interval.sumProduction) || 0,
+    sumSharing: Number(interval.sumSharing) || 0,
+    sumMissed: Number(interval.sumMissed) || 0,
+  }));
+
+  const fallbackFrom = intervals.length > 0 ? intervals[0].start : new Date();
+  const fallbackTo = intervals.length > 0
+    ? new Date(intervals[intervals.length - 1].start.getTime() + 15 * 60000)
+    : fallbackFrom;
+
+  return {
+    filename: String(payload.filename || "server-edc.csv"),
+    producers: producers.map((item, idx) => ({ name: String(item.name || ""), csvIndex: Number(item.csvIndex) || idx })),
+    consumers: consumers.map((item, idx) => ({ name: String(item.name || ""), csvIndex: Number(item.csvIndex) || idx })),
+    intervals,
+    dateFrom: Number.isFinite(Number(payload.dateFrom)) ? new Date(Number(payload.dateFrom)) : fallbackFrom,
+    dateTo: Number.isFinite(Number(payload.dateTo)) ? new Date(Number(payload.dateTo)) : fallbackTo,
+  };
+}
+
+async function loadMemberSharingData() {
+  if (!isMemberSharingPage) {
+    return;
+  }
+
+  const token = (window.edcAuth && typeof window.edcAuth.getToken === "function"
+    ? window.edcAuth.getToken()
+    : localStorage.getItem("edc_auth_token")) || "";
+  if (!token) {
+    if (dom.status) {
+      dom.status.textContent = "Pro zobrazení dat se přihlas.";
+    }
+    return;
+  }
+
+  if (dom.status) {
+    dom.status.textContent = "Načítám data z databáze...";
+  }
+
+  const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
+  const response = await fetch(`${apiBase}/member/sharing-data`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(payload && payload.error ? payload.error : "Nepodarilo se nacist data clena.");
+  }
+
+  const nextLabels = payload && payload.eanLabels && typeof payload.eanLabels === "object"
+    ? payload.eanLabels
+    : {};
+  gMemberScope = payload && payload.memberScope && typeof payload.memberScope === "object"
+    ? payload.memberScope
+    : { ownProducers: [], ownConsumers: [] };
+  gEanLabelMap = new Map(Object.entries(nextLabels));
+  updateEanLabelsStatus();
+
+  const hydrated = hydrateServerSharingData(payload.data);
+  onDataLoaded(hydrated);
 }
 
 async function readFileAsText(file) {
@@ -2250,22 +3073,28 @@ async function readFileAsText(file) {
   }
 }
 
-dom.uploadCsv.addEventListener("change", async () => {
-  const file = dom.uploadCsv.files && dom.uploadCsv.files[0];
-  if (!file) {
-    return;
-  }
+if (dom.uploadCsv) {
+  dom.uploadCsv.addEventListener("change", async () => {
+    const file = dom.uploadCsv.files && dom.uploadCsv.files[0];
+    if (!file) {
+      return;
+    }
 
-  try {
-    dom.status.textContent = "Načítám a zpracovávám CSV...";
-    await gEanLabelMapReady;
-    const text = await readFileAsText(file);
-    const parsed = parseCsv(text, file.name);
-    onDataLoaded(parsed);
-  } catch (err) {
-    dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
-  }
-});
+    try {
+      if (dom.status) {
+        dom.status.textContent = "Načítám a zpracovávám CSV...";
+      }
+      await gEanLabelMapReady;
+      const text = await readFileAsText(file);
+      const parsed = parseCsv(text, file.name);
+      onDataLoaded(parsed);
+    } catch (err) {
+      if (dom.status) {
+        dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+  });
+}
 
 if (dom.filterDateFrom) {
   dom.filterDateFrom.addEventListener("change", () => {
@@ -2330,7 +3159,7 @@ if (dom.producerSummary) {
       return;
     }
     const toggleBtn = target.closest("button.row-toggle");
-    if (toggleBtn instanceof HTMLElement && gData && pageMode === "sharing") {
+    if (toggleBtn instanceof HTMLElement && gData && isSharingLikePage) {
       const row = target.closest("tr[data-producer-name]");
       if (row instanceof HTMLTableRowElement) {
         const producerName = row.dataset.producerName;
@@ -2350,7 +3179,7 @@ if (dom.producerSummary) {
       return;
     }
     const producerName = row.dataset.producerName;
-    if (!producerName || !gData || pageMode !== "sharing") {
+    if (!producerName || !gData || !isSharingLikePage) {
       return;
     }
     gSelectedProducerName = gSelectedProducerName === producerName ? null : producerName;
@@ -2361,7 +3190,7 @@ if (dom.producerSummary) {
 if (dom.consumerSummary) {
   dom.consumerSummary.addEventListener("click", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLElement) || !gData || pageMode !== "sharing") {
+    if (!(target instanceof HTMLElement) || !gData || !isSharingLikePage) {
       return;
     }
     const sortHeader = target.closest("th[data-sort-table='consumer']");
@@ -2572,4 +3401,24 @@ if (dom.exportBtn) {
   const base = gData.filename.replace(/\.csv$/i, "");
   triggerCsvDownload(`${base}_multi_ean_results.csv`, content);
   });
+}
+
+if (isMemberSharingPage) {
+  window.addEventListener("edc-auth-state", () => {
+    gEanLabelMapReady
+      .then(() => loadMemberSharingData())
+      .catch((err) => {
+        if (dom.status) {
+          dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      });
+  });
+
+  gEanLabelMapReady
+    .then(() => loadMemberSharingData())
+    .catch((err) => {
+      if (dom.status) {
+        dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    });
 }

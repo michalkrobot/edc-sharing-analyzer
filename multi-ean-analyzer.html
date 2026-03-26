@@ -35,10 +35,7 @@
         <p class="hero-text">
           Nahráj CSV report, nastav alokace odběratelů a simuluj sdílení i optimální váhy napříč více výrobnými zdroji.
         </p>
-        <nav class="page-nav">
-          <a href="multi-ean-sharing.html" class="nav-link">Zobrazení sdílení</a>
-          <a href="multi-ean-analyzer.html" class="nav-link is-active">Simulace</a>
-        </nav>
+        <div id="pageNavMount"></div>
       </header>
 
       <section class="card controls">
@@ -138,6 +135,8 @@
     </main>
 
     <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script defer src="auth-config.js"></script>
+    <script defer src="auth-client.js"></script>
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
 </html>
