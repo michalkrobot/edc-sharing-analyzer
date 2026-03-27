@@ -3011,6 +3011,24 @@ function hydrateServerSharingData(payload) {
   };
 }
 
+function clearAllDataSections() {
+  gData = null;
+  gFilteredData = null;
+  gLastResult = null;
+  gMemberScope = null;
+
+  const sectionIds = [
+    "metaSection", "summarySection", "sharingSection", "timeFilterSection",
+    "producerPieChartsSection", "producerConsumerPieChartsSection", "consumerProducerPieChartsSection",
+    "producerDailyTotalsSection", "consumerDailyTotalsSection",
+    "bestDaySection", "consumerBestDaySection", "averageDaySection", "consumerAverageDaySection",
+  ];
+  for (const id of sectionIds) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = true;
+  }
+}
+
 async function loadMemberSharingData() {
   if (!isMemberSharingPage) {
     return;
@@ -3038,12 +3056,24 @@ async function loadMemberSharingData() {
     ? window.edcAuth.isAdmin()
     : false;
 
+  console.log("[EDC-ANALYZER] loadMemberSharingData: selectedMemberId=", selectedMemberId, "isAdmin=", isAdmin);
+
   let endpoint = "/member/sharing-data";
   if (selectedMemberId && isAdmin) {
     const tenantId = (window.edcAuth && typeof window.edcAuth.getUser === "function"
       ? (window.edcAuth.getUser() && window.edcAuth.getUser().tenantId)
       : null) || (window.edcAuthState && window.edcAuthState.user && window.edcAuthState.user.tenantId) || "";
     endpoint = `/admin/member-sharing-data?tenantId=${encodeURIComponent(tenantId)}&memberId=${encodeURIComponent(selectedMemberId)}`;
+    console.log("[EDC-ANALYZER] Loading member data with endpoint:", endpoint);
+  } else if (!selectedMemberId && isAdmin) {
+    console.log("[EDC-ANALYZER] Admin with no member selected, waiting for selection...");
+    clearAllDataSections();
+    if (dom.status) {
+      dom.status.textContent = "Vyberte člena ze seznamu výše.";
+    }
+    return;
+  } else {
+    console.log("[EDC-ANALYZER] Using default member endpoint (no member selected or not admin)");
   }
 
   const response = await fetch(`${apiBase}${endpoint}`, {
@@ -3061,6 +3091,7 @@ async function loadMemberSharingData() {
   }
 
   if (!response.ok) {
+    clearAllDataSections();
     throw new Error(payload && payload.error ? payload.error : "Nepodarilo se nacist data clena.");
   }
 
@@ -3074,6 +3105,7 @@ async function loadMemberSharingData() {
   updateEanLabelsStatus();
 
   const hydrated = hydrateServerSharingData(payload.data);
+  console.log("[EDC-ANALYZER] loadMemberSharingData completed successfully, data loaded");
   onDataLoaded(hydrated);
 }
 
@@ -3429,7 +3461,8 @@ if (isMemberSharingPage) {
       });
   });
 
-  window.addEventListener("edc-member-filter-changed", () => {
+  window.addEventListener("edc-member-filter-changed", (event) => {
+    console.log("[EDC-ANALYZER] edc-member-filter-changed event received:", event.detail);
     gEanLabelMapReady
       .then(() => loadMemberSharingData())
       .catch((err) => {
@@ -3446,4 +3479,18 @@ if (isMemberSharingPage) {
         dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
       }
     });
+
+  // Expose API for auth-client.js
+  window.edcAnalyzer = {
+    refreshMemberData: function() {
+      console.log("[EDC-ANALYZER] refreshMemberData called from external");
+      gEanLabelMapReady
+        .then(() => loadMemberSharingData())
+        .catch((err) => {
+          if (dom.status) {
+            dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        });
+    }
+  };
 }

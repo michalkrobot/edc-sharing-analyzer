@@ -13,6 +13,11 @@
     edcImportInfo: null,
   };
 
+  // Expose auth state globally for multi-ean-analyzer.js
+  window.edcAuthState = {
+    user: null,
+  };
+
   function qs(selector) {
     return document.querySelector(selector);
   }
@@ -846,6 +851,7 @@
 
         authToken = response.token;
         authUser = response.user || { email: pendingEmail };
+        window.edcAuthState.user = authUser;
         localStorage.setItem(TOKEN_STORAGE_KEY, authToken);
         status.textContent = "Přihlášení úspěšné.";
         finalizeAuthenticated();
@@ -965,10 +971,12 @@
     try {
       const response = await apiRequest("/auth/session", { method: "GET" }, true);
       authUser = response.user || null;
+      window.edcAuthState.user = authUser;
       return true;
     } catch {
       authToken = "";
       authUser = null;
+      window.edcAuthState.user = null;
       localStorage.removeItem(TOKEN_STORAGE_KEY);
       return false;
     }
@@ -985,6 +993,7 @@
 
     authToken = "";
     authUser = null;
+    window.edcAuthState.user = null;
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     upsertHeaderAuth("");
     closeLoginOverlay();
@@ -1034,6 +1043,8 @@
       const response = await apiRequest(`/admin/members?tenantId=${tenantId}`, { method: "GET" }, true);
       const members = response && Array.isArray(response.members) ? response.members : [];
 
+      // Reset selection - admin must always explicitly choose a member
+      sessionStorage.removeItem("edc_member_filter");
       memberSelect.innerHTML = '<option value="">-- Vyberte člena --</option>';
       for (const member of members) {
         const option = document.createElement("option");
@@ -1043,6 +1054,7 @@
       }
 
       filterSection.hidden = false;
+      console.log("[EDC] Loaded", members.length, "members for admin filter");
     } catch (err) {
       console.error("Failed to load members for admin filter", err);
     }
@@ -1050,25 +1062,36 @@
 
   function setupMemberFilterListener() {
     if (!isMemberSharingPage()) {
+      console.log("[EDC] Not on member-sharing page, skipping filter setup");
       return;
     }
 
     const memberSelect = document.getElementById("memberSelect");
+    console.log("[EDC] setupMemberFilterListener: memberSelect =", memberSelect);
     if (!memberSelect) {
+      console.log("[EDC] memberSelect element not found!");
       return;
     }
 
     memberSelect.addEventListener("change", () => {
       const selectedMemberId = memberSelect.value;
+      console.log("[EDC] Member filter changed:", selectedMemberId);
       if (selectedMemberId) {
         sessionStorage.setItem("edc_member_filter", selectedMemberId);
       } else {
         sessionStorage.removeItem("edc_member_filter");
       }
+      console.log("[EDC] Dispatching edc-member-filter-changed event with memberId:", selectedMemberId);
       window.dispatchEvent(new CustomEvent("edc-member-filter-changed", {
         detail: { selectedMemberId },
       }));
+      // Also directly refresh via external API
+      if (window.edcAnalyzer && typeof window.edcAnalyzer.refreshMemberData === "function") {
+        console.log("[EDC] Calling window.edcAnalyzer.refreshMemberData()");
+        window.edcAnalyzer.refreshMemberData();
+      }
     });
+    console.log("[EDC] setupMemberFilterListener: event listener registered successfully");
   }
 
   window.edcAuth = {
