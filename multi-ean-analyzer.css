@@ -2189,7 +2189,46 @@ body[data-page="sharing"] .chart-canvas {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
+.member-filter-card {
+  margin-bottom: 1.2rem;
+}
+
+.member-filter-toolbar {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.9rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.member-filter-label {
+  font-weight: 500;
+  color: var(--heading);
+}
+
+.member-filter-select {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.55rem 0.65rem;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text-base);
+  font-family: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.member-filter-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(102, 178, 94, 0.1);
+}
+
 @media (max-width: 840px) {
+  .member-filter-toolbar {
+    grid-template-columns: 1fr;
+  }
+
   .time-range-filter {
     grid-template-columns: 1fr;
     gap: 0.55rem;

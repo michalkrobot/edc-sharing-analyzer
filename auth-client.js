@@ -917,6 +917,7 @@
     applyGlobalAdminOnlyVisibility();
     enforceGlobalAdminSimulationAccess();
     enforceMemberSharingAuth();
+    loadMembersForAdminFilter();
     window.dispatchEvent(new CustomEvent("edc-auth-state", {
       detail: {
         isAuthenticated: Boolean(authToken),
@@ -1013,6 +1014,63 @@
     enforceGlobalAdminSimulationAccess();
   }
 
+  async function loadMembersForAdminFilter() {
+    if (!isMemberSharingPage() || !isAdminUser()) {
+      return;
+    }
+
+    const filterSection = document.getElementById("memberFilterSection");
+    const memberSelect = document.getElementById("memberSelect");
+    if (!filterSection || !memberSelect) {
+      return;
+    }
+
+    try {
+      const tenantId = getEffectiveTenantId();
+      if (!tenantId) {
+        return;
+      }
+
+      const response = await apiRequest(`/admin/members?tenantId=${tenantId}`, { method: "GET" }, true);
+      const members = response && Array.isArray(response.members) ? response.members : [];
+
+      memberSelect.innerHTML = '<option value="">-- Vyberte člena --</option>';
+      for (const member of members) {
+        const option = document.createElement("option");
+        option.value = String(member.id || "");
+        option.textContent = `${member.fullName || member.email} (${member.email})`;
+        memberSelect.appendChild(option);
+      }
+
+      filterSection.hidden = false;
+    } catch (err) {
+      console.error("Failed to load members for admin filter", err);
+    }
+  }
+
+  function setupMemberFilterListener() {
+    if (!isMemberSharingPage()) {
+      return;
+    }
+
+    const memberSelect = document.getElementById("memberSelect");
+    if (!memberSelect) {
+      return;
+    }
+
+    memberSelect.addEventListener("change", () => {
+      const selectedMemberId = memberSelect.value;
+      if (selectedMemberId) {
+        sessionStorage.setItem("edc_member_filter", selectedMemberId);
+      } else {
+        sessionStorage.removeItem("edc_member_filter");
+      }
+      window.dispatchEvent(new CustomEvent("edc-member-filter-changed", {
+        detail: { selectedMemberId },
+      }));
+    });
+  }
+
   window.edcAuth = {
     getToken: function () {
       return authToken;
@@ -1027,6 +1085,9 @@
       return Boolean(authToken);
     },
     logout,
+    getSelectedMemberId: function () {
+      return sessionStorage.getItem("edc_member_filter") || "";
+    },
   };
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -1034,6 +1095,7 @@
     renderHomeHeroActions();
     renderHomeLandingCards();
     applyGlobalAdminOnlyVisibility();
+    setupMemberFilterListener();
     initAuth();
   });
 })();

@@ -3031,7 +3031,22 @@ async function loadMemberSharingData() {
   }
 
   const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
-  const response = await fetch(`${apiBase}/member/sharing-data`, {
+  const selectedMemberId = window.edcAuth && typeof window.edcAuth.getSelectedMemberId === "function"
+    ? window.edcAuth.getSelectedMemberId()
+    : "";
+  const isAdmin = window.edcAuth && typeof window.edcAuth.isAdmin === "function"
+    ? window.edcAuth.isAdmin()
+    : false;
+
+  let endpoint = "/member/sharing-data";
+  if (selectedMemberId && isAdmin) {
+    const tenantId = (window.edcAuth && typeof window.edcAuth.getUser === "function"
+      ? (window.edcAuth.getUser() && window.edcAuth.getUser().tenantId)
+      : null) || (window.edcAuthState && window.edcAuthState.user && window.edcAuthState.user.tenantId) || "";
+    endpoint = `/admin/member-sharing-data?tenantId=${encodeURIComponent(tenantId)}&memberId=${encodeURIComponent(selectedMemberId)}`;
+  }
+
+  const response = await fetch(`${apiBase}${endpoint}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -3405,6 +3420,16 @@ if (dom.exportBtn) {
 
 if (isMemberSharingPage) {
   window.addEventListener("edc-auth-state", () => {
+    gEanLabelMapReady
+      .then(() => loadMemberSharingData())
+      .catch((err) => {
+        if (dom.status) {
+          dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      });
+  });
+
+  window.addEventListener("edc-member-filter-changed", () => {
     gEanLabelMapReady
       .then(() => loadMemberSharingData())
       .catch((err) => {

@@ -1561,6 +1561,37 @@ async function start() {
     }
   });
 
+  app.get("/api/admin/member-sharing-data", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      const requestedTenantId = req.query ? req.query.tenantId : null;
+      const requestedMemberId = req.query ? req.query.memberId : null;
+
+      if (!requestedMemberId) {
+        res.status(400).json({ error: "Chybi parametr memberId." });
+        return;
+      }
+
+      const tenant = await resolveTenantScope(req, requestedTenantId);
+      const memberId = Number.parseInt(String(requestedMemberId), 10);
+
+      const member = await db.get(
+        "SELECT id, tenant_id FROM users WHERE id = ? AND tenant_id = ? AND is_active = 1",
+        [memberId, tenant.id],
+      );
+
+      if (!member) {
+        res.status(403).json({ error: "Clen neexistuje v teto tenanta nebo neni aktivni." });
+        return;
+      }
+
+      const payload = await buildMemberSharingData(memberId, tenant.id);
+      res.json(payload);
+    } catch (err) {
+      console.error("admin-member-sharing-data failed", err);
+      res.status(400).json({ error: err instanceof Error ? err.message : "Nepodarilo se nacist data clena." });
+    }
+  });
+
   app.listen(PORT, () => {
     console.log(`Auth backend listening on ${AUTH_BASE_URL}`);
   });
