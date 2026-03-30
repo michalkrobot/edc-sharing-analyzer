@@ -22,4 +22,4 @@ backend-net/src/Edc.Backend.Api/obj/
 data/
 
 # Local auth database
-backend/auth.db
+auth.db
