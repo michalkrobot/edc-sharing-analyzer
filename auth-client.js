@@ -3,6 +3,7 @@
   const AUTH_REQUIRED = window.EDC_AUTH_REQUIRED !== false;
   const APP_NAME = String(window.EDC_AUTH_APP_NAME || "EDC CSV TOOL");
   const TOKEN_STORAGE_KEY = "edc_auth_token";
+  const SHARING_FLOW_MODE_STORAGE_KEY = "edc_sharing_flow_mode";
 
   let authToken = localStorage.getItem(TOKEN_STORAGE_KEY) || "";
   let authUser = null;
@@ -11,12 +12,42 @@
     selectedTenantId: "",
     editingTenantId: "",
     edcImportInfo: null,
+    edcLinkImportInfo: null,
   };
 
   // Expose auth state globally for multi-ean-analyzer.js
   window.edcAuthState = {
     user: null,
   };
+
+  function normalizeSharingFlowMode(value) {
+    return value === "exact" || value === "estimate" ? value : "auto";
+  }
+
+  function getSharingFlowModeStorageKey(tenantId) {
+    return `${SHARING_FLOW_MODE_STORAGE_KEY}:${String(tenantId || "default")}`;
+  }
+
+  function getStoredSharingFlowMode(tenantId) {
+    if (!tenantId) {
+      return "auto";
+    }
+    return normalizeSharingFlowMode(localStorage.getItem(getSharingFlowModeStorageKey(tenantId)) || "auto");
+  }
+
+  function setStoredSharingFlowMode(tenantId, mode) {
+    if (!tenantId) {
+      return;
+    }
+    const normalizedMode = normalizeSharingFlowMode(mode);
+    localStorage.setItem(getSharingFlowModeStorageKey(tenantId), normalizedMode);
+    window.dispatchEvent(new CustomEvent("edc-sharing-flow-mode-changed", {
+      detail: {
+        tenantId: String(tenantId),
+        mode: normalizedMode,
+      },
+    }));
+  }
 
   function qs(selector) {
     return document.querySelector(selector);
@@ -36,6 +67,10 @@
 
   function isMemberSharingPage() {
     return Boolean(document.body && document.body.dataset.page === "member-sharing");
+  }
+
+  function isSharingViewPage() {
+    return Boolean(document.body && document.body.dataset.page === "sharing");
   }
 
   function buildSharedNavigation() {
@@ -247,6 +282,10 @@
     return administered.length > 0 ? String(administered[0].id) : "";
   }
 
+  function getEffectiveSharingFlowMode() {
+    return getStoredSharingFlowMode(getEffectiveTenantId());
+  }
+
   function setAuthLock(locked) {
     if (locked) {
       document.body.classList.add("auth-locked");
@@ -360,12 +399,14 @@
     section.id = "adminSettingsSection";
     section.className = "card admin-settings-card";
     section.hidden = true;
-    section.innerHTML = "<div class='admin-settings-head'><div><p class='landing-section-kicker'>Administrace</p><h2>Nastavení</h2></div><button id='adminSettingsCloseBtn' type='button' class='btn btn-ghost'>Zavřít</button></div><p class='section-description'>Pouze administrátor může importovat EDC data, databázi členů a EAN vazby. Vazba uživatel ↔ EAN vzniká podle sloupce jméno člena.</p><div id='adminTenantScopeWrap' class='admin-tenant-scope' hidden><label class='admin-import-field'>Aktivní tenant<select id='adminTenantSelect'></select></label></div><div class='admin-members-card'><div class='admin-members-head'><h3>EDC data</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Soubor EDC exportu<input id='adminEdcFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcBtn' type='button' class='btn btn-primary'>Importovat EDC data</button></div><p id='adminEdcImportStatus' class='auth-status'></p><div id='adminEdcImportDetails' class='admin-members-empty'></div></div><div class='admin-import-card'><label class='admin-import-field'>Soubor členů (clenove.csv)<input id='adminMembersFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportMembersBtn' type='button' class='btn btn-primary'>Importovat členy</button></div><p id='adminImportStatus' class='auth-status'></p><div class='admin-import-card'><label class='admin-import-field'>Soubor EAN (eany.csv)<input id='adminEansFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEansBtn' type='button' class='btn btn-primary'>Importovat EAN</button></div><p id='adminEansImportStatus' class='auth-status'></p><div id='adminEansImportDetails' class='admin-members-empty'></div><div id='globalTenantManagement' class='admin-members-card' hidden><div class='admin-members-head'><h3>Tenanti</h3><button id='adminTenantNewBtn' type='button' class='btn btn-ghost'>Nový tenant</button></div><div id='adminTenantsList' class='admin-members-list'></div><div class='admin-import-card'><label class='admin-import-field'>Název tenanta<input id='adminTenantNameInput' type='text' placeholder='Např. Enerkom horní pomoraví' /></label><label class='admin-import-field'>Admini (e-maily oddělené čárkou)<input id='adminTenantAdminsInput' type='text' placeholder='admin1@firma.cz, admin2@firma.cz' /></label><button id='adminTenantSaveBtn' type='button' class='btn btn-primary'>Uložit tenant</button></div><p id='adminTenantStatus' class='auth-status'></p></div><div class='admin-members-card'><div class='admin-members-head'><h3>Importovaní členové</h3><button id='adminReloadMembersBtn' type='button' class='btn btn-ghost'>Obnovit seznam</button></div><div id='adminMembersList' class='admin-members-list'></div></div></section>";
+    section.innerHTML = `<div class='admin-settings-head'><div><p class='landing-section-kicker'>Administrace</p><h2>Nastavení</h2></div><button id='adminSettingsCloseBtn' type='button' class='btn btn-ghost'>Zavřít</button></div><p class='section-description'>Pouze administrátor může importovat EDC data, databázi členů, EAN vazby a přesné vazby výrobna → odběr. Vazba uživatel ↔ EAN vzniká podle sloupce jméno člena.</p><div id='adminTenantScopeWrap' class='admin-tenant-scope' hidden><label class='admin-import-field'>Aktivní tenant<select id='adminTenantSelect'></select></label></div><div id='adminSharingFlowModeWrap' class='admin-sharing-flow-card' hidden><div><h3>Režim toku sdílení</h3><p class='section-description'>Tenant admin může přepnout, zda se mají v přehledech použít přesné vazby, nebo jen odhad z hlavního EDC exportu.</p></div><label class='admin-import-field'>Použití přesných vazeb<select id='adminSharingFlowModeSelect'><option value='auto'>Automaticky: použít přesná data, když existují</option><option value='exact'>Vynutit přesná data</option><option value='estimate'>Vynutit odhad</option></select></label></div><div class='admin-members-card'><div class='admin-members-head'><h3>EDC data</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Soubor EDC exportu<input id='adminEdcFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcBtn' type='button' class='btn btn-primary'>Importovat EDC data</button></div><div class='admin-import-card'><label class='admin-import-field'>Soubor přesných vazeb (šipky)<input id='adminEdcLinksFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcLinksBtn' type='button' class='btn btn-primary'>Importovat přesné vazby</button></div><p id='adminEdcImportStatus' class='auth-status'></p><div id='adminEdcImportDetails' class='admin-members-empty'></div></div><div class='admin-import-card'><label class='admin-import-field'>Soubor členů (clenove.csv)<input id='adminMembersFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportMembersBtn' type='button' class='btn btn-primary'>Importovat členy</button></div><p id='adminImportStatus' class='auth-status'></p><div class='admin-import-card'><label class='admin-import-field'>Soubor EAN (eany.csv)<input id='adminEansFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEansBtn' type='button' class='btn btn-primary'>Importovat EAN</button></div><p id='adminEansImportStatus' class='auth-status'></p><div id='adminEansImportDetails' class='admin-members-empty'></div><div id='globalTenantManagement' class='admin-members-card' hidden><div class='admin-members-head'><h3>Tenanti</h3><button id='adminTenantNewBtn' type='button' class='btn btn-ghost'>Nový tenant</button></div><div id='adminTenantsList' class='admin-members-list'></div><div class='admin-import-card'><label class='admin-import-field'>Název tenanta<input id='adminTenantNameInput' type='text' placeholder='Např. Enerkom horní pomoraví' /></label><label class='admin-import-field'>Admini (e-maily oddělené čárkou)<input id='adminTenantAdminsInput' type='text' placeholder='admin1@firma.cz, admin2@firma.cz' /></label><button id='adminTenantSaveBtn' type='button' class='btn btn-primary'>Uložit tenant</button></div><p id='adminTenantStatus' class='auth-status'></p></div><div class='admin-members-card'><div class='admin-members-head'><h3>Importovaní členové</h3><button id='adminReloadMembersBtn' type='button' class='btn btn-ghost'>Obnovit seznam</button></div><div id='adminMembersList' class='admin-members-list'></div></div></section>`;
     appShell.insertBefore(section, appShell.firstElementChild ? appShell.firstElementChild.nextElementSibling || appShell.lastElementChild : null);
 
     const closeBtn = document.getElementById("adminSettingsCloseBtn");
     const edcFileInput = document.getElementById("adminEdcFileInput");
     const importEdcBtn = document.getElementById("adminImportEdcBtn");
+    const edcLinksFileInput = document.getElementById("adminEdcLinksFileInput");
+    const importEdcLinksBtn = document.getElementById("adminImportEdcLinksBtn");
     const edcStatus = document.getElementById("adminEdcImportStatus");
     const edcDetails = document.getElementById("adminEdcImportDetails");
     const importBtn = document.getElementById("adminImportMembersBtn");
@@ -377,6 +418,8 @@
     const eansDetails = document.getElementById("adminEansImportDetails");
     const tenantScopeWrap = document.getElementById("adminTenantScopeWrap");
     const tenantSelect = document.getElementById("adminTenantSelect");
+    const sharingFlowModeWrap = document.getElementById("adminSharingFlowModeWrap");
+    const sharingFlowModeSelect = document.getElementById("adminSharingFlowModeSelect");
     const globalTenantManagement = document.getElementById("globalTenantManagement");
     const tenantNewBtn = document.getElementById("adminTenantNewBtn");
     const tenantNameInput = document.getElementById("adminTenantNameInput");
@@ -388,13 +431,26 @@
     if (tenantScopeWrap) {
       tenantScopeWrap.hidden = !isGlobalAdminUser();
     }
+    if (sharingFlowModeWrap) {
+      sharingFlowModeWrap.hidden = isGlobalAdminUser();
+    }
     if (globalTenantManagement) {
       globalTenantManagement.hidden = !isGlobalAdminUser();
+    }
+
+    if (sharingFlowModeSelect) {
+      sharingFlowModeSelect.value = getEffectiveSharingFlowMode();
+      sharingFlowModeSelect.addEventListener("change", () => {
+        setStoredSharingFlowMode(getEffectiveTenantId(), sharingFlowModeSelect.value || "auto");
+      });
     }
 
     if (tenantSelect) {
       tenantSelect.addEventListener("change", async () => {
         adminState.selectedTenantId = String(tenantSelect.value || "");
+        if (sharingFlowModeSelect) {
+          sharingFlowModeSelect.value = getEffectiveSharingFlowMode();
+        }
         await loadAdminEdcImport();
         await loadAdminMembers();
       });
@@ -443,6 +499,46 @@
           edcStatus.textContent = formatError(err, "Import EDC selhal.");
         } finally {
           importEdcBtn.disabled = false;
+        }
+      });
+    }
+
+    if (importEdcLinksBtn && edcLinksFileInput && edcStatus) {
+      importEdcLinksBtn.addEventListener("click", async () => {
+        const file = edcLinksFileInput.files && edcLinksFileInput.files[0];
+        if (!file) {
+          edcStatus.textContent = "Vyber soubor přesných vazeb (šipky).";
+          return;
+        }
+
+        importEdcLinksBtn.disabled = true;
+        edcStatus.textContent = "Načítám soubor a ukládám přesné vazby na server...";
+        try {
+          const tenantId = getEffectiveTenantId();
+          if (!tenantId) {
+            edcStatus.textContent = "Vyber tenant pro import přesných vazeb.";
+            return;
+          }
+
+          const csvText = await readTextFileWithFallback(file);
+          const response = await apiRequest(
+            "/admin/import-edc-links",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ csvText, filename: file.name, tenantId }),
+            },
+            true,
+          );
+
+          adminState.edcLinkImportInfo = response.linkImportInfo || null;
+          edcStatus.textContent = response.message || "Přesné vazby byly uloženy.";
+          edcLinksFileInput.value = "";
+          renderAdminEdcImport();
+        } catch (err) {
+          edcStatus.textContent = formatError(err, "Import přesných vazeb selhal.");
+        } finally {
+          importEdcLinksBtn.disabled = false;
         }
       });
     }
@@ -685,12 +781,20 @@
     }
 
     const info = adminState.edcImportInfo;
-    if (!info) {
+    const linkInfo = adminState.edcLinkImportInfo;
+    if (!info && !linkInfo) {
       details.innerHTML = "<p class='admin-members-empty'>Pro tento tenant zatím nejsou na serveru uložená žádná EDC data.</p>";
       return;
     }
 
-    details.innerHTML = `<div class='admin-edc-summary'><span><strong>Soubor:</strong> ${escapeHtml(info.filename || "-")}</span><span><strong>Importováno:</strong> ${escapeHtml(formatAdminDateTime(info.importedAt))}</span><span><strong>Období:</strong> ${escapeHtml(formatAdminDateTime(info.dateFrom))} až ${escapeHtml(formatAdminDateTime(info.dateTo))}</span><span><strong>Výrobní EAN:</strong> ${escapeHtml(String(info.producerCount || 0))}</span><span><strong>Odběrné EAN:</strong> ${escapeHtml(String(info.consumerCount || 0))}</span><span><strong>Intervaly:</strong> ${escapeHtml(String(info.intervalCount || 0))}</span></div>`;
+    const baseSummary = info
+      ? `<div class='admin-edc-summary'><span><strong>EDC soubor:</strong> ${escapeHtml(info.filename || "-")}</span><span><strong>Importováno:</strong> ${escapeHtml(formatAdminDateTime(info.importedAt))}</span><span><strong>Období:</strong> ${escapeHtml(formatAdminDateTime(info.dateFrom))} až ${escapeHtml(formatAdminDateTime(info.dateTo))}</span><span><strong>Výrobní EAN:</strong> ${escapeHtml(String(info.producerCount || 0))}</span><span><strong>Odběrné EAN:</strong> ${escapeHtml(String(info.consumerCount || 0))}</span><span><strong>Intervaly:</strong> ${escapeHtml(String(info.intervalCount || 0))}</span></div>`
+      : "<p class='admin-members-empty'>Hlavní EDC export zatím nebyl nahrán.</p>";
+    const linkSummary = linkInfo
+      ? `<div class='admin-edc-summary'><span><strong>Soubor vazeb:</strong> ${escapeHtml(linkInfo.filename || "-")}</span><span><strong>Importováno:</strong> ${escapeHtml(formatAdminDateTime(linkInfo.importedAt))}</span><span><strong>Období:</strong> ${escapeHtml(formatAdminDateTime(linkInfo.dateFrom))} až ${escapeHtml(formatAdminDateTime(linkInfo.dateTo))}</span><span><strong>Počet vazeb:</strong> ${escapeHtml(String(linkInfo.linkCount || 0))}</span><span><strong>Intervaly:</strong> ${escapeHtml(String(linkInfo.intervalCount || 0))}</span></div>`
+      : "<p class='admin-members-empty'>Přesné vazby výrobna → odběr zatím nebyly nahrány. Bez tohoto souboru aplikace používá odhad.</p>";
+
+    details.innerHTML = `${baseSummary}${linkSummary}`;
   }
 
   async function loadAdminEdcImport() {
@@ -714,9 +818,11 @@
     try {
       const response = await apiRequest(`/admin/edc-import?tenantId=${encodeURIComponent(tenantId)}`, { method: "GET" }, true);
       adminState.edcImportInfo = response.importInfo || null;
+      adminState.edcLinkImportInfo = response.linkImportInfo || null;
       renderAdminEdcImport();
     } catch (err) {
       adminState.edcImportInfo = null;
+      adminState.edcLinkImportInfo = null;
       details.innerHTML = `<p class='admin-members-empty'>${escapeHtml(formatError(err, "Nepodařilo se načíst EDC data."))}</p>`;
     }
   }
@@ -924,6 +1030,7 @@
     enforceGlobalAdminSimulationAccess();
     enforceMemberSharingAuth();
     loadMembersForAdminFilter();
+    loadSharingGroupsForAdmin();
     window.dispatchEvent(new CustomEvent("edc-auth-state", {
       detail: {
         isAuthenticated: Boolean(authToken),
@@ -1094,6 +1201,86 @@
     console.log("[EDC] setupMemberFilterListener: event listener registered successfully");
   }
 
+  async function loadSharingGroupsForAdmin() {
+    if (!isSharingViewPage() || !isAdminUser()) {
+      return;
+    }
+
+    const filterSection = document.getElementById("sharingGroupFilterSection");
+    const groupSelect = document.getElementById("sharingGroupSelect");
+    const fileUploadControls = document.getElementById("fileUploadControls");
+    if (!filterSection || !groupSelect) {
+      return;
+    }
+
+    try {
+      const response = await apiRequest("/admin/sharing-groups", { method: "GET" }, true);
+      const groups = response && Array.isArray(response.groups) ? response.groups : [];
+
+      groupSelect.innerHTML = '<option value="">-- Vyberte skupinu sdílení --</option>';
+      for (const group of groups) {
+        const option = document.createElement("option");
+        option.value = String(group.id || "");
+        option.textContent = group.name;
+        groupSelect.appendChild(option);
+      }
+
+      if (fileUploadControls) {
+        fileUploadControls.hidden = true;
+      }
+      filterSection.hidden = false;
+
+      if (groups.length === 1) {
+        const onlyGroupId = String(groups[0].id);
+        groupSelect.value = onlyGroupId;
+        sessionStorage.setItem("edc_sharing_group_filter", onlyGroupId);
+        window.dispatchEvent(new CustomEvent("edc-sharing-group-changed", {
+          detail: { selectedGroupId: onlyGroupId },
+        }));
+        if (window.edcAnalyzer && typeof window.edcAnalyzer.refreshGroupData === "function") {
+          window.edcAnalyzer.refreshGroupData();
+        }
+      } else {
+        const stored = sessionStorage.getItem("edc_sharing_group_filter");
+        if (stored && groups.some((group) => String(group.id) === stored)) {
+          groupSelect.value = stored;
+        } else {
+          sessionStorage.removeItem("edc_sharing_group_filter");
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load sharing groups for admin filter", err);
+    }
+  }
+
+  function setupSharingGroupListener() {
+    if (!isSharingViewPage()) {
+      return;
+    }
+
+    const groupSelect = document.getElementById("sharingGroupSelect");
+    if (!groupSelect) {
+      return;
+    }
+
+    groupSelect.addEventListener("change", () => {
+      const selectedGroupId = groupSelect.value;
+      if (selectedGroupId) {
+        sessionStorage.setItem("edc_sharing_group_filter", selectedGroupId);
+      } else {
+        sessionStorage.removeItem("edc_sharing_group_filter");
+      }
+
+      window.dispatchEvent(new CustomEvent("edc-sharing-group-changed", {
+        detail: { selectedGroupId },
+      }));
+
+      if (window.edcAnalyzer && typeof window.edcAnalyzer.refreshGroupData === "function") {
+        window.edcAnalyzer.refreshGroupData();
+      }
+    });
+  }
+
   window.edcAuth = {
     getToken: function () {
       return authToken;
@@ -1107,9 +1294,15 @@
     isAuthenticated: function () {
       return Boolean(authToken);
     },
+    getSharingFlowMode: function () {
+      return getEffectiveSharingFlowMode();
+    },
     logout,
     getSelectedMemberId: function () {
       return sessionStorage.getItem("edc_member_filter") || "";
+    },
+    getSelectedGroupId: function () {
+      return sessionStorage.getItem("edc_sharing_group_filter") || "";
     },
   };
 
@@ -1119,6 +1312,7 @@
     renderHomeLandingCards();
     applyGlobalAdminOnlyVisibility();
     setupMemberFilterListener();
+    setupSharingGroupListener();
     initAuth();
   });
 })();

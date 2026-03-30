@@ -115,8 +115,45 @@ const ECHART_THEME = {
   softSplitLine: "#eef3ea",
   tooltipBg: "rgba(31, 42, 29, 0.95)",
   tooltipBorder: "rgba(159, 230, 211, 0.25)",
-  palette: ["#10b981", "#2563eb", "#f59e0b", "#ef4444", "#7c3aed", "#0891b2"],
+  palette: ["#6f9fcf", "#76b7aa", "#d5b06e", "#e58b8b", "#9f8fd0", "#80b8d6"],
 };
+
+const EXECUTIVE_COLOR_PAIRS = [
+  ["#8bb7df", "#5f8fbe"],
+  ["#92cec1", "#5ea99b"],
+  ["#f1cd92", "#c8a063"],
+  ["#b9c6d6", "#8498ae"],
+  ["#d0c5ef", "#9c8bc9"],
+  ["#9dcfe8", "#6ea8ca"],
+  ["#c6dca5", "#96b876"],
+  ["#e8c1ad", "#c9957b"],
+  ["#b7c7f3", "#869ed9"],
+  ["#aed9cf", "#7fb8ad"],
+  ["#e2c2b3", "#ba9484"],
+  ["#c8d0dd", "#95a4b8"],
+];
+
+function makeExecutiveGradient(topColor, bottomColor) {
+  return {
+    type: "linear",
+    x: 0,
+    y: 0,
+    x2: 0,
+    y2: 1,
+    colorStops: [
+      { offset: 0, color: topColor },
+      { offset: 1, color: bottomColor },
+    ],
+  };
+}
+
+function getExecutiveColorPair(index) {
+  return EXECUTIVE_COLOR_PAIRS[index % EXECUTIVE_COLOR_PAIRS.length];
+}
+
+function getExecutiveSolidColor(index) {
+  return getExecutiveColorPair(index)[1];
+}
 
 function getEcharts() {
   if (typeof window === "undefined") {
@@ -526,6 +563,115 @@ function parseDatetimeLocalValue(value) {
     return null;
   }
   return parsed;
+}
+
+function ensureAllocationSourceSection() {
+  if (!isSharingLikePage) {
+    return null;
+  }
+
+  let section = document.getElementById("allocationSourceSection");
+  if (section) {
+    return section;
+  }
+
+  const summarySection = document.getElementById("summarySection");
+  const appShell = document.querySelector(".app-shell");
+  if (!summarySection || !appShell) {
+    return null;
+  }
+
+  section = document.createElement("section");
+  section.id = "allocationSourceSection";
+  section.className = "card allocation-source-card";
+  section.hidden = true;
+  section.innerHTML = "<div class='allocation-source-head'><h2>Zdroj toku sdílení</h2><span id='allocationSourceBadge' class='allocation-source-badge'></span></div><p id='allocationSourceText' class='allocation-source-text'></p>";
+  appShell.insertBefore(section, summarySection);
+  return section;
+}
+
+function getRequestedAllocationMode() {
+  if (window.edcAuth && typeof window.edcAuth.getSharingFlowMode === "function") {
+    const mode = window.edcAuth.getSharingFlowMode();
+    if (mode === "exact" || mode === "estimate") {
+      return mode;
+    }
+  }
+  return "auto";
+}
+
+function getAllocationModeInfo(data) {
+  const hasExactAllocations = Boolean(data && data.hasExactAllocations);
+  const requestedMode = getRequestedAllocationMode();
+
+  if (requestedMode === "estimate") {
+    return {
+      effectiveMode: "estimate",
+      badge: "Odhad",
+      badgeClass: "is-estimate",
+      description: hasExactAllocations
+        ? "Tenant admin vynutil odhad. Přesné vazby jsou nahrané, ale v tomto zobrazení se nepoužívají."
+        : "Přesné vazby nejsou aktivní, rozpad toku sdílení se počítá odhadem z agregovaných hodnot.",
+    };
+  }
+
+  if (requestedMode === "exact") {
+    if (hasExactAllocations) {
+      return {
+        effectiveMode: "exact",
+        badge: "Přesná data",
+        badgeClass: "is-exact",
+        description: "Tenant admin vynutil použití přesných vazeb výrobna → odběr z nahraného šipkového souboru.",
+      };
+    }
+
+    return {
+      effectiveMode: "estimate",
+      badge: "Chybí přesná data",
+      badgeClass: "is-warning",
+      description: "Tenant admin požaduje přesná data, ale pro tento tenant zatím nejsou nahrané přesné vazby. Aplikace proto dočasně používá odhad.",
+    };
+  }
+
+  if (hasExactAllocations) {
+    return {
+      effectiveMode: "exact",
+      badge: "Přesná data",
+      badgeClass: "is-exact",
+      description: "Aplikace automaticky používá přesné vazby výrobna → odběr z nahraného šipkového souboru.",
+    };
+  }
+
+  return {
+    effectiveMode: "estimate",
+    badge: "Odhad",
+    badgeClass: "is-estimate",
+    description: "Přesné vazby nejsou nahrané, proto aplikace automaticky používá odhad toku sdílení z agregovaných hodnot.",
+  };
+}
+
+function renderAllocationSourceInfo(data) {
+  const section = ensureAllocationSourceSection();
+  if (!section) {
+    return;
+  }
+
+  if (!data) {
+    section.hidden = true;
+    return;
+  }
+
+  const badge = document.getElementById("allocationSourceBadge");
+  const text = document.getElementById("allocationSourceText");
+  if (!badge || !text) {
+    return;
+  }
+
+  const modeInfo = getAllocationModeInfo(data);
+  badge.className = `allocation-source-badge ${modeInfo.badgeClass}`;
+  badge.textContent = modeInfo.badge;
+  text.textContent = modeInfo.description;
+  section.hidden = false;
 }
 
 function getActiveData() {
@@ -1357,10 +1503,19 @@ function drawProducerOverviewChart(canvas, producerStats, tooltip) {
   const shared = producerStats.map((p) => Math.max(0, p.before - p.after));
   const missed = producerStats.map((p) => Math.max(0, p.missed));
   const remainderAfterSharing = producerStats.map((p) => Math.max(0, p.after));
+  const sharedBarData = shared.map((value, index) => {
+    const [top, bottom] = getExecutiveColorPair(index);
+    return {
+      value,
+      itemStyle: {
+        color: makeExecutiveGradient(top, bottom),
+      },
+    };
+  });
 
   createChartForCanvas(canvas, withEchartTheme({
     animationDuration: 500,
-    color: ["#10b981", "#f59e0b"],
+    color: ["#10b981", "#dc2626"],
     legend: {
       bottom: 6,
       textStyle: {
@@ -1391,8 +1546,8 @@ function drawProducerOverviewChart(canvas, producerStats, tooltip) {
     grid: {
       left: 58,
       right: 30,
-      top: 36,
-      bottom: 92,
+      top: 24,
+      bottom: 82,
     },
     xAxis: {
       type: "category",
@@ -1416,16 +1571,19 @@ function drawProducerOverviewChart(canvas, producerStats, tooltip) {
         name: "Sdílení",
         type: "bar",
         stack: "allocation",
-        data: shared,
+        data: sharedBarData,
         barMaxWidth: 46,
         itemStyle: { borderRadius: [0, 0, 6, 6] },
       },
       {
-        name: "Zůstatek po sdílení",
+        name: "Nesdílená výroba",
         type: "bar",
         stack: "allocation",
         data: remainderAfterSharing,
-        itemStyle: { borderRadius: [6, 6, 0, 0] },
+        itemStyle: {
+          borderRadius: [6, 6, 0, 0],
+          color: makeExecutiveGradient("#f6b1b1", "#e67b7b"),
+        },
       },
     ],
   }));
@@ -1590,7 +1748,7 @@ function renderProducerPieCharts(producerStats) {
     ? new Set(gMemberScope.ownProducers)
     : null;
   
-  const colors = ["#10b981", "#ef4444", "#f59e0b"];
+  const colors = ["#5ea99b", "#c9957b", "#e67b7b"];
   const labels = ["Sdílení", "Ušlá příl.", "Zůstatek"];
   
   for (const producer of producerStats) {
@@ -1620,9 +1778,9 @@ function renderProducerPieCharts(producerStats) {
     const statsDiv = document.createElement("div");
     statsDiv.style.cssText = "font-size: 10px; color: #5f6d5c; margin-top: 0.4rem; line-height: 1.3;";
     statsDiv.innerHTML = `
-      <div><span style="color: #10b981;">●</span> Sdílení: ${shared.toFixed(1)} kWh</div>
-      <div><span style="color: #ef4444;">●</span> Ušlá příl.: ${missed.toFixed(1)} kWh</div>
-      <div><span style="color: #f59e0b;">●</span> Zůstatek: ${remainder.toFixed(1)} kWh</div>
+      <div><span style="color: #5ea99b;">●</span> Sdílení: ${shared.toFixed(1)} kWh</div>
+      <div><span style="color: #c9957b;">●</span> Ušlá příl.: ${missed.toFixed(1)} kWh</div>
+      <div><span style="color: #e67b7b;">●</span> Zůstatek: ${remainder.toFixed(1)} kWh</div>
     `;
     wrapper.appendChild(statsDiv);
     
@@ -1642,15 +1800,15 @@ function renderProducerPieCharts(producerStats) {
 }
 
 const CONSUMER_COLORS = [
-  "#2563eb", "#7c3aed", "#db2777", "#ea580c", "#16a34a",
-  "#0891b2", "#9333ea", "#dc2626", "#b45309", "#4f46e5",
-  "#059669", "#0284c7", "#c026d3", "#ca8a04", "#15803d",
+  "#5f8fbe", "#5ea99b", "#c8a063", "#8498ae", "#9c8bc9",
+  "#6ea8ca", "#96b876", "#c9957b", "#869ed9", "#7fb8ad",
+  "#ba9484", "#95a4b8", "#80b8d6", "#8caf8a", "#9d93c7",
 ];
 
 const PRODUCER_COLORS = [
-  "#2563eb", "#10b981", "#f59e0b", "#7c3aed", "#ef4444",
-  "#0891b2", "#9333ea", "#dc2626", "#ca8a04", "#059669",
-  "#0284c7", "#b45309", "#4f46e5", "#c026d3", "#15803d",
+  "#5f8fbe", "#5ea99b", "#c8a063", "#8498ae", "#9c8bc9",
+  "#6ea8ca", "#96b876", "#c9957b", "#869ed9", "#7fb8ad",
+  "#ba9484", "#95a4b8", "#80b8d6", "#8caf8a", "#9d93c7",
 ];
 
 function computeProducerConsumerAllocations(data) {
@@ -1658,6 +1816,25 @@ function computeProducerConsumerAllocations(data) {
     name: p.name,
     consumerAllocations: data.consumers.map((c) => ({ name: c.name, shared: 0 })),
   }));
+
+  const shouldUseExactAllocations = getAllocationModeInfo(data).effectiveMode === "exact";
+
+  if (shouldUseExactAllocations) {
+    for (const interval of data.intervals) {
+      if (!Array.isArray(interval.exactAllocations)) {
+        continue;
+      }
+
+      for (let pi = 0; pi < interval.exactAllocations.length; pi += 1) {
+        const row = Array.isArray(interval.exactAllocations[pi]) ? interval.exactAllocations[pi] : [];
+        for (let ci = 0; ci < row.length; ci += 1) {
+          result[pi].consumerAllocations[ci].shared += Number(row[ci]) || 0;
+        }
+      }
+    }
+
+    return result;
+  }
 
   for (const interval of data.intervals) {
     const totalConsumerReceived = interval.consumers.reduce(
@@ -2004,8 +2181,8 @@ function drawAverageDayChart(canvas, points, showConsumptionOrOptions, tooltip) 
       smooth: 0.25,
       showSymbol: points.length <= 120,
       symbolSize: 5,
-      lineStyle: { width: 2.4, color: "#2563eb" },
-      itemStyle: { color: "#2563eb" },
+      lineStyle: { width: 2.4, color: "#1f4f8b" },
+      itemStyle: { color: "#1f4f8b" },
     });
   }
 
@@ -2017,8 +2194,8 @@ function drawAverageDayChart(canvas, points, showConsumptionOrOptions, tooltip) 
       smooth: 0.25,
       showSymbol: points.length <= 120,
       symbolSize: 5,
-      lineStyle: { width: 2.4, color: "#f59e0b" },
-      itemStyle: { color: "#f59e0b" },
+      lineStyle: { width: 2.4, color: "#b45309" },
+      itemStyle: { color: "#b45309" },
     });
   }
 
@@ -2029,9 +2206,9 @@ function drawAverageDayChart(canvas, points, showConsumptionOrOptions, tooltip) 
     smooth: 0.25,
     showSymbol: points.length <= 120,
     symbolSize: 5,
-    lineStyle: { width: 2.8, color: "#10b981" },
-    itemStyle: { color: "#10b981" },
-    areaStyle: { color: "rgba(16, 185, 129, 0.14)" },
+    lineStyle: { width: 2.8, color: "#0f766e" },
+    itemStyle: { color: "#0f766e" },
+    areaStyle: { color: "rgba(15, 118, 110, 0.14)" },
   });
 
   createChartForCanvas(canvas, withEchartTheme({
@@ -2201,6 +2378,48 @@ function computeDailyProducerTotals(intervals) {
     });
 }
 
+function computeDailyProducerBreakdown(intervals, producers) {
+  const producerCount = Array.isArray(producers) ? producers.length : 0;
+  const days = new Map();
+
+  for (const interval of intervals) {
+    const d = interval.start;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    if (!days.has(key)) {
+      days.set(key, {
+        key,
+        sharedByProducer: Array(producerCount).fill(0),
+        nonSharedTotal: 0,
+      });
+    }
+
+    const bucket = days.get(key);
+    const intervalProducers = Array.isArray(interval.producers) ? interval.producers : [];
+    for (let i = 0; i < producerCount; i += 1) {
+      const producer = intervalProducers[i] || { before: 0, after: 0 };
+      const before = Number(producer.before) || 0;
+      const after = Number(producer.after) || 0;
+      bucket.sharedByProducer[i] += Math.max(0, before - after);
+      bucket.nonSharedTotal += Math.max(0, after);
+    }
+  }
+
+  const sorted = Array.from(days.values()).sort((a, b) => a.key.localeCompare(b.key));
+  const labels = sorted.map((day) => {
+    const [year, month, date] = day.key.split("-");
+    return `${Number.parseInt(date, 10)}.${Number.parseInt(month, 10)}.`;
+  });
+
+  return {
+    labels,
+    sharedByProducerSeries: Array.from({ length: producerCount }, (_unused, producerIndex) =>
+      sorted.map((day) => Number(day.sharedByProducer[producerIndex]) || 0),
+    ),
+    nonSharedSeries: sorted.map((day) => Number(day.nonSharedTotal) || 0),
+  };
+}
+
 function renderProducerDailyTotalsChart(data) {
   const canvas = document.getElementById("producerDailyTotalsChart");
   const section = document.getElementById("producerDailyTotalsSection");
@@ -2209,8 +2428,9 @@ function renderProducerDailyTotalsChart(data) {
     return;
   }
 
-  const isMemberWithProducers = isMemberSharingPage && getMemberOwnedProducerCount() > 0;
-  if (!isMemberWithProducers) {
+  const shouldRenderForPage = pageMode === "sharing"
+    || (isMemberSharingPage && getMemberOwnedProducerCount() > 0);
+  if (!shouldRenderForPage) {
     section.hidden = true;
     destroyChartForElement(canvas);
     return;
@@ -2229,9 +2449,145 @@ function renderProducerDailyTotalsChart(data) {
   const totalProduction = points.reduce((sumValue, point) => sumValue + point.production, 0);
   const totalShared = points.reduce((sumValue, point) => sumValue + point.shared, 0);
   const remainderValues = points.map((point) => Math.max(0, point.production - point.shared));
+  const producerPalette = EXECUTIVE_COLOR_PAIRS;
 
   if (description) {
     description.textContent = `Součet za období: výroba ${fmt(totalProduction)} | sdílení ${fmt(totalShared)}. Denní sloupce jsou skládané do jedné celkové výroby.`;
+  }
+
+  if (pageMode === "sharing") {
+    const breakdown = computeDailyProducerBreakdown(chartIntervals, data.producers);
+    const producerSummaries = Array.isArray(data.producers)
+      ? data.producers.map((producer, index) => {
+        let production = 0;
+        let shared = 0;
+        let remainder = 0;
+
+        for (const interval of chartIntervals) {
+          const item = Array.isArray(interval.producers) ? interval.producers[index] : null;
+          const before = Number(item && item.before) || 0;
+          const after = Number(item && item.after) || 0;
+          production += before;
+          shared += Math.max(0, before - after);
+          remainder += Math.max(0, after);
+        }
+
+        const producerName = displayEan(producer.name);
+        const labelOnly = producerName.includes(" (") ? producerName.split(" (")[0] : producerName;
+        const eanValue = String(producer.name || "");
+        const eanSuffix = eanValue.slice(-6);
+        const shortName = labelOnly.length > 24 ? `${labelOnly.slice(0, 24)}...` : labelOnly;
+        const firstLine = `${shortName} (${eanSuffix})`;
+        const secondLine = `V:${fmt(production)} S:${fmt(shared)} Z:${fmt(remainder)}`;
+        return {
+          legendName: `${firstLine}\n${secondLine}`,
+          totalShared: shared,
+        };
+      })
+      : [];
+
+    const sharedSeries = Array.isArray(data.producers)
+      ? data.producers.map((producer, index) => {
+        const palette = producerPalette[index % producerPalette.length];
+        return {
+          name: producerSummaries[index] ? producerSummaries[index].legendName : `Sdílení ${displayEan(producer.name)}`,
+          type: "bar",
+          stack: "daily-production",
+          data: breakdown.sharedByProducerSeries[index] || [],
+          barMaxWidth: 30,
+          totalValue: producerSummaries[index] ? producerSummaries[index].totalShared : 0,
+          itemStyle: {
+            color: makeExecutiveGradient(palette[0], palette[1]),
+            borderRadius: [3, 3, 0, 0],
+            borderColor: "rgba(255,255,255,0.45)",
+            borderWidth: 0.6,
+          },
+        };
+      })
+      : [];
+
+    const nonSharedTotal = remainderValues.reduce((sumValue, value) => sumValue + value, 0);
+    const nonSharedSeries = {
+      name: `Nesdílená výroba | Z:${fmt(nonSharedTotal)}`,
+      type: "bar",
+      stack: "daily-production",
+      data: breakdown.nonSharedSeries,
+      barMaxWidth: 30,
+      totalValue: nonSharedTotal,
+      itemStyle: {
+        color: makeExecutiveGradient("#f6b1b1", "#e67b7b"),
+        borderRadius: [3, 3, 0, 0],
+        borderColor: "rgba(255,255,255,0.5)",
+        borderWidth: 0.6,
+      },
+    };
+
+    const sortedSharedSeries = [...sharedSeries]
+      .sort((a, b) => (Number(b.totalValue) || 0) - (Number(a.totalValue) || 0))
+      .map(({ totalValue, ...series }) => series);
+    const stackedSeries = [...sortedSharedSeries, (({ totalValue, ...series }) => series)(nonSharedSeries)];
+
+    createChartForCanvas(canvas, withEchartTheme({
+      animationDuration: 450,
+      tooltip: {
+        ...buildEchartTooltip(),
+        trigger: "axis",
+        formatter: (params) => {
+          if (!params.length) return "";
+          const lines = [`<strong>${params[0].axisValueLabel}</strong>`];
+          let total = 0;
+          for (const p of params) {
+            const value = Number(p.value) || 0;
+            if (value <= 0) {
+              continue;
+            }
+            total += value;
+            const label = String(p.seriesName || "").replace(/\n/g, "<br/>");
+            lines.push(`${p.marker} ${label}: ${value.toFixed(2)} kWh`);
+          }
+          lines.push(`<strong>Celkem výroba: ${total.toFixed(2)} kWh</strong>`);
+          return lines.join("<br/>");
+        },
+      },
+      legend: {
+        left: 56,
+        right: 24,
+        bottom: 6,
+        type: "scroll",
+        orient: "horizontal",
+        textStyle: { color: "#20301e", fontFamily: "Space Grotesk, sans-serif", fontSize: 11, lineHeight: 15 },
+      },
+      grid: {
+        left: 58,
+        right: 30,
+        top: 20,
+        bottom: 126,
+      },
+      xAxis: {
+        type: "category",
+        data: breakdown.labels,
+        axisLabel: {
+          color: "#20301e",
+          interval: Math.max(0, Math.floor(breakdown.labels.length / 12)),
+          margin: 14,
+        },
+        axisLine: { lineStyle: { color: "#ced8c9" } },
+        splitLine: { show: false },
+      },
+      yAxis: {
+        type: "value",
+        name: "kWh",
+        axisLabel: {
+          color: "#4f5f4c",
+          formatter: (value) => Number(value).toFixed(2),
+        },
+        splitLine: { lineStyle: { color: "#dce5d8" } },
+      },
+      series: [
+        ...stackedSeries,
+      ],
+    }));
+    return;
   }
 
   createChartForCanvas(canvas, withEchartTheme({
@@ -2837,10 +3193,12 @@ function renderSharingPage(data) {
 function renderCurrentView() {
   const activeData = getActiveData();
   if (!activeData) {
+    renderAllocationSourceInfo(null);
     return;
   }
 
   renderMeta(activeData);
+  renderAllocationSourceInfo(activeData);
   renderSummary(activeData);
 
   if (isSharingLikePage) {
@@ -2918,6 +3276,8 @@ function onDataLoaded(data) {
     dom.exportBtn.disabled = true;
   }
 
+  renderAllocationSourceInfo(data);
+
   if (isSharingLikePage) {
     if (dom.timeFilterSection) {
       dom.timeFilterSection.hidden = false;
@@ -2991,6 +3351,9 @@ function hydrateServerSharingData(payload) {
       after: Number(item.after) || 0,
       missed: Number(item.missed) || 0,
     })) : [],
+    exactAllocations: Array.isArray(interval.exactAllocations)
+      ? interval.exactAllocations.map((row) => Array.isArray(row) ? row.map((value) => Number(value) || 0) : [])
+      : null,
     sumProduction: Number(interval.sumProduction) || 0,
     sumSharing: Number(interval.sumSharing) || 0,
     sumMissed: Number(interval.sumMissed) || 0,
@@ -3006,6 +3369,7 @@ function hydrateServerSharingData(payload) {
     producers: producers.map((item, idx) => ({ name: String(item.name || ""), csvIndex: Number(item.csvIndex) || idx })),
     consumers: consumers.map((item, idx) => ({ name: String(item.name || ""), csvIndex: Number(item.csvIndex) || idx })),
     intervals,
+    hasExactAllocations: Boolean(payload.hasExactAllocations),
     dateFrom: Number.isFinite(Number(payload.dateFrom)) ? new Date(Number(payload.dateFrom)) : fallbackFrom,
     dateTo: Number.isFinite(Number(payload.dateTo)) ? new Date(Number(payload.dateTo)) : fallbackTo,
   };
@@ -3016,6 +3380,7 @@ function clearAllDataSections() {
   gFilteredData = null;
   gLastResult = null;
   gMemberScope = null;
+  renderAllocationSourceInfo(null);
 
   const sectionIds = [
     "metaSection", "summarySection", "sharingSection", "timeFilterSection",
@@ -3101,11 +3466,77 @@ async function loadMemberSharingData() {
   gMemberScope = payload && payload.memberScope && typeof payload.memberScope === "object"
     ? payload.memberScope
     : { ownProducers: [], ownConsumers: [] };
-  gEanLabelMap = new Map(Object.entries(nextLabels));
+  gEanLabelMap = new Map([...gEanLabelMap, ...Object.entries(nextLabels)]);
   updateEanLabelsStatus();
 
   const hydrated = hydrateServerSharingData(payload.data);
   console.log("[EDC-ANALYZER] loadMemberSharingData completed successfully, data loaded");
+  onDataLoaded(hydrated);
+}
+
+async function loadAdminGroupSharingData() {
+  if (pageMode !== "sharing") {
+    return;
+  }
+
+  const token = (window.edcAuth && typeof window.edcAuth.getToken === "function"
+    ? window.edcAuth.getToken()
+    : localStorage.getItem("edc_auth_token")) || "";
+  if (!token) {
+    return;
+  }
+
+  const isAdmin = window.edcAuth && typeof window.edcAuth.isAdmin === "function"
+    ? window.edcAuth.isAdmin()
+    : false;
+  if (!isAdmin) {
+    return;
+  }
+
+  const selectedGroupId = window.edcAuth && typeof window.edcAuth.getSelectedGroupId === "function"
+    ? window.edcAuth.getSelectedGroupId()
+    : "";
+
+  if (!selectedGroupId) {
+    clearAllDataSections();
+    if (dom.status) {
+      dom.status.textContent = "Vyberte skupinu sdílení ze seznamu výše.";
+    }
+    return;
+  }
+
+  if (dom.status) {
+    dom.status.textContent = "Načítám data skupiny sdílení...";
+  }
+
+  const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
+  const response = await fetch(`${apiBase}/admin/sharing-data?groupId=${encodeURIComponent(selectedGroupId)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    clearAllDataSections();
+    throw new Error(payload && payload.error ? payload.error : "Nepodařilo se načíst data skupiny sdílení.");
+  }
+
+  const nextLabels = payload && payload.eanLabels && typeof payload.eanLabels === "object"
+    ? payload.eanLabels
+    : {};
+  gMemberScope = null;
+  gEanLabelMap = new Map([...gEanLabelMap, ...Object.entries(nextLabels)]);
+  updateEanLabelsStatus();
+
+  const hydrated = hydrateServerSharingData(payload.data);
   onDataLoaded(hydrated);
 }
 
@@ -3493,4 +3924,54 @@ if (isMemberSharingPage) {
         });
     }
   };
+}
+
+if (pageMode === "sharing") {
+  window.addEventListener("edc-auth-state", () => {
+    gEanLabelMapReady
+      .then(() => loadAdminGroupSharingData())
+      .catch((err) => {
+        if (dom.status) {
+          dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      });
+  });
+
+  window.addEventListener("edc-sharing-group-changed", () => {
+    gEanLabelMapReady
+      .then(() => loadAdminGroupSharingData())
+      .catch((err) => {
+        if (dom.status) {
+          dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      });
+  });
+
+  gEanLabelMapReady
+    .then(() => loadAdminGroupSharingData())
+    .catch((err) => {
+      if (dom.status) {
+        dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    });
+
+  window.edcAnalyzer = window.edcAnalyzer || {};
+  window.edcAnalyzer.refreshGroupData = function () {
+    gEanLabelMapReady
+      .then(() => loadAdminGroupSharingData())
+      .catch((err) => {
+        if (dom.status) {
+          dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      });
+  };
+}
+
+if (isSharingLikePage) {
+  window.addEventListener("edc-sharing-flow-mode-changed", () => {
+    if (!gData) {
+      return;
+    }
+    renderCurrentView();
+  });
 }

@@ -169,6 +169,20 @@ async function initDb() {
       imported_at INTEGER NOT NULL,
       FOREIGN KEY (tenant_id) REFERENCES tenants(id)
     );
+
+    CREATE TABLE IF NOT EXISTS tenant_edc_link_imports (
+      tenant_id INTEGER PRIMARY KEY,
+      filename TEXT NOT NULL,
+      source_hash TEXT NOT NULL,
+      csv_text TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      link_count INTEGER NOT NULL,
+      interval_count INTEGER NOT NULL,
+      date_from INTEGER NOT NULL,
+      date_to INTEGER NOT NULL,
+      imported_at INTEGER NOT NULL,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+    );
   `);
 
   await ensureUserColumns();
@@ -541,6 +555,22 @@ function serializeEdcImport(row) {
   };
 }
 
+function serializeEdcLinkImport(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    tenantId: row.tenant_id,
+    filename: row.filename || "",
+    linkCount: Number(row.link_count) || 0,
+    intervalCount: Number(row.interval_count) || 0,
+    dateFrom: row.date_from || null,
+    dateTo: row.date_to || null,
+    importedAt: row.imported_at || null,
+  };
+}
+
 async function getAdministeredTenants(userId) {
   return await db.all(
     `SELECT t.id, t.name
@@ -821,6 +851,191 @@ function parseEdcCsv(csvText, filename) {
   };
 }
 
+function parseEdcLinksCsv(csvText, filename) {
+  const lines = String(csvText || "")
+    .replaceAll("\r\n", "\n")
+    .split("\n")
+    .filter((line) => line.trim().length > 0);
+
+  if (lines.length < 2) {
+    throw new Error("CSV vazeb je prazdne nebo neobsahuje data.");
+  }
+
+  const header = lines[0].split(";");
+  if (header[0] !== "Datum" || header[1] !== "Cas od" || header[2] !== "Cas do") {
+    throw new Error("Neplatna CSV hlavicka souboru vazeb.");
+  }
+
+  const columns = [];
+  for (let i = 3; i < header.length; i += 1) {
+    const value = String(header[i] || "").trim();
+    if (!value) {
+      continue;
+    }
+    const parts = value.split("-");
+    if (parts.length !== 2) {
+      throw new Error(`Neplatny sloupec vazby: ${value}`);
+    }
+    const producerEan = normalizeEan(parts[0]);
+    const consumerEan = normalizeEan(parts[1]);
+    if (!producerEan || !consumerEan) {
+      throw new Error(`Neplatny sloupec vazby: ${value}`);
+    }
+    columns.push({ producerEan, consumerEan, csvIndex: i });
+  }
+
+  if (columns.length === 0) {
+    throw new Error("CSV vazeb neobsahuje zadne sloupce vyrobna-odber.");
+  }
+
+  const intervals = [];
+  for (let lineNo = 1; lineNo < lines.length; lineNo += 1) {
+    const parts = lines[lineNo].split(";");
+    if (parts.length < 3) {
+      continue;
+    }
+
+    const start = parseEdcDate(parts).getTime();
+    const links = [];
+    for (const column of columns) {
+      const shared = Math.max(0, parseKwhValue(parts[column.csvIndex]));
+      if (shared <= 0) {
+        continue;
+      }
+      links.push({
+        producerEan: column.producerEan,
+        consumerEan: column.consumerEan,
+        shared,
+      });
+    }
+    intervals.push({ start, links });
+  }
+
+  if (intervals.length === 0) {
+    throw new Error("CSV vazeb neobsahuje platne intervaly.");
+  }
+
+  const dateFrom = intervals[0].start;
+  const dateTo = intervals[intervals.length - 1].start + (15 * 60 * 1000);
+
+  return {
+    filename: String(filename || "edc-links.csv"),
+    columns,
+    intervals,
+    dateFrom,
+    dateTo,
+  };
+}
+
+async function saveTenantEdcLinkImport(csvText, tenantId, filename) {
+  const parsed = parseEdcLinksCsv(csvText, filename);
+  const now = Date.now();
+  const sourceHash = hashValue(String(csvText || ""));
+  const payloadJson = JSON.stringify(parsed);
+
+  await db.run(
+    `INSERT INTO tenant_edc_link_imports(
+       tenant_id, filename, source_hash, csv_text, payload_json,
+       link_count, interval_count, date_from, date_to, imported_at
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(tenant_id) DO UPDATE SET
+       filename = excluded.filename,
+       source_hash = excluded.source_hash,
+       csv_text = excluded.csv_text,
+       payload_json = excluded.payload_json,
+       link_count = excluded.link_count,
+       interval_count = excluded.interval_count,
+       date_from = excluded.date_from,
+       date_to = excluded.date_to,
+       imported_at = excluded.imported_at`,
+    [
+      tenantId,
+      parsed.filename,
+      sourceHash,
+      String(csvText || ""),
+      payloadJson,
+      parsed.columns.length,
+      parsed.intervals.length,
+      parsed.dateFrom,
+      parsed.dateTo,
+      now,
+    ],
+  );
+
+  const saved = await db.get(
+    `SELECT tenant_id, filename, link_count, interval_count, date_from, date_to, imported_at
+       FROM tenant_edc_link_imports
+      WHERE tenant_id = ?`,
+    [tenantId],
+  );
+
+  return {
+    importInfo: serializeEdcLinkImport(saved),
+    parsed,
+  };
+}
+
+async function getTenantEdcLinkImport(tenantId) {
+  const row = await db.get(
+    `SELECT tenant_id, filename, link_count, interval_count, date_from, date_to, imported_at
+       FROM tenant_edc_link_imports
+      WHERE tenant_id = ?`,
+    [tenantId],
+  );
+  return serializeEdcLinkImport(row);
+}
+
+function buildExactIntervalAllocations(basePayload, linkPayload) {
+  if (!basePayload || !linkPayload) {
+    return null;
+  }
+
+  const producerIndexByEan = new Map(
+    (Array.isArray(basePayload.producers) ? basePayload.producers : [])
+      .map((producer, index) => [normalizeEan(producer.name), index])
+      .filter(([ean]) => !!ean),
+  );
+  const consumerIndexByEan = new Map(
+    (Array.isArray(basePayload.consumers) ? basePayload.consumers : [])
+      .map((consumer, index) => [normalizeEan(consumer.name), index])
+      .filter(([ean]) => !!ean),
+  );
+  const linkIntervalsByStart = new Map(
+    (Array.isArray(linkPayload.intervals) ? linkPayload.intervals : [])
+      .map((interval) => [Number(interval.start) || 0, interval]),
+  );
+
+  let hasExactAllocations = false;
+  const intervals = (Array.isArray(basePayload.intervals) ? basePayload.intervals : []).map((interval) => {
+    const exactAllocations = Array.from({ length: producerIndexByEan.size }, () => Array(consumerIndexByEan.size).fill(0));
+    const linkInterval = linkIntervalsByStart.get(Number(interval.start) || 0);
+    if (linkInterval && Array.isArray(linkInterval.links)) {
+      for (const link of linkInterval.links) {
+        const producerIndex = producerIndexByEan.get(normalizeEan(link.producerEan));
+        const consumerIndex = consumerIndexByEan.get(normalizeEan(link.consumerEan));
+        if (producerIndex === undefined || consumerIndex === undefined) {
+          continue;
+        }
+        const shared = Number(link.shared) || 0;
+        if (shared <= 0) {
+          continue;
+        }
+        exactAllocations[producerIndex][consumerIndex] += shared;
+        hasExactAllocations = true;
+      }
+    }
+    return {
+      ...interval,
+      exactAllocations,
+    };
+  });
+
+  return {
+    hasExactAllocations,
+    intervals,
+  };
+}
+
 async function saveTenantEdcImport(csvText, tenantId, filename) {
   const parsed = parseEdcCsv(csvText, filename);
   const now = Date.now();
@@ -1019,9 +1234,29 @@ async function buildMemberSharingData(userId, tenantId) {
     throw new Error("Ulozena EDC data se nepodarilo nacist.");
   }
 
+  let exactLinkPayload = null;
+  const exactImportRow = await db.get(
+    `SELECT payload_json
+       FROM tenant_edc_link_imports
+      WHERE tenant_id = ?`,
+    [tenantId],
+  );
+  if (exactImportRow && exactImportRow.payload_json) {
+    try {
+      exactLinkPayload = JSON.parse(exactImportRow.payload_json);
+    } catch {
+      exactLinkPayload = null;
+    }
+  }
+
+  const exactAllocationsBundle = buildExactIntervalAllocations(payload, exactLinkPayload);
+  const baseIntervals = exactAllocationsBundle && Array.isArray(exactAllocationsBundle.intervals)
+    ? exactAllocationsBundle.intervals
+    : (Array.isArray(payload.intervals) ? payload.intervals : []);
+
   const rawProducers = Array.isArray(payload.producers) ? payload.producers : [];
   const rawConsumers = Array.isArray(payload.consumers) ? payload.consumers : [];
-  const rawIntervals = Array.isArray(payload.intervals) ? payload.intervals : [];
+  const rawIntervals = baseIntervals;
 
   const assignedRows = await db.all("SELECT ean, label, member_name FROM user_eans WHERE user_id = ?", [userId]);
   const assignedSet = new Set(assignedRows.map((row) => normalizeEan(row.ean)).filter(Boolean));
@@ -1134,6 +1369,13 @@ async function buildMemberSharingData(userId, tenantId) {
       };
     });
 
+    const rawExactAllocations = Array.isArray(interval.exactAllocations) ? interval.exactAllocations : null;
+    const nextExactAllocations = rawExactAllocations
+      ? selectedProducerIndexes.map((producerIndex) =>
+          selectedConsumerIndexes.map((consumerIndex) => Number(rawExactAllocations[producerIndex] && rawExactAllocations[producerIndex][consumerIndex]) || 0)
+        )
+      : null;
+
     const sumProduction = nextProducers.reduce((acc, item) => acc + item.before, 0);
     const sumSharing = Math.min(
       Math.max(0, sumProduction - nextProducers.reduce((acc, item) => acc + item.after, 0)),
@@ -1148,6 +1390,7 @@ async function buildMemberSharingData(userId, tenantId) {
       start: Number(interval.start) || 0,
       producers: nextProducers,
       consumers: nextConsumers,
+      ...(nextExactAllocations ? { exactAllocations: nextExactAllocations } : {}),
       sumProduction,
       sumSharing,
       sumMissed,
@@ -1170,6 +1413,7 @@ async function buildMemberSharingData(userId, tenantId) {
       producers,
       consumers,
       intervals,
+      hasExactAllocations: Boolean(exactAllocationsBundle && exactAllocationsBundle.hasExactAllocations),
       dateFrom: Number(payload.dateFrom) || (intervals[0] ? intervals[0].start : Date.now()),
       dateTo: Number(payload.dateTo) || (intervals.length > 0 ? intervals[intervals.length - 1].start : Date.now()),
     },
@@ -1235,6 +1479,169 @@ function requireGlobalAdmin(req, res, next) {
     return;
   }
   next();
+}
+
+async function resolveGroupAccess(req, requestedGroupId) {
+  if (!req.auth) {
+    throw new Error("Missing auth context.");
+  }
+
+  if (!requestedGroupId) {
+    throw new Error("Chybi parametr groupId.");
+  }
+
+  const groupId = Number.parseInt(String(requestedGroupId), 10);
+  if (!groupId || Number.isNaN(groupId)) {
+    throw new Error("Neplatny parametr groupId.");
+  }
+
+  if (isGlobalAdminRole(req.auth.role)) {
+    const tenant = await getTenantById(groupId);
+    if (!tenant) {
+      throw new Error("Skupina sdileni neexistuje.");
+    }
+    return tenant;
+  }
+
+  const administered = await getAdministeredTenants(req.auth.userId);
+  const found = administered.find((tenant) => Number(tenant.id) === groupId);
+  if (found) {
+    return found;
+  }
+
+  if (Number(req.auth.tenant_id) === groupId) {
+    const tenant = await getTenantById(groupId);
+    if (tenant) {
+      return tenant;
+    }
+  }
+
+  throw new Error("Nemas pristup k teto skupine sdileni.");
+}
+
+async function buildTenantFullSharingData(tenantId) {
+  const importRow = await db.get(
+    `SELECT payload_json, filename
+       FROM tenant_edc_imports
+      WHERE tenant_id = ?`,
+    [tenantId],
+  );
+
+  if (!importRow || !importRow.payload_json) {
+    throw new Error("Pro tuto skupinu sdileni zatim nejsou ulozena EDC data.");
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(importRow.payload_json);
+  } catch {
+    throw new Error("Ulozena EDC data se nepodarilo nacist.");
+  }
+
+  let exactLinkPayload = null;
+  const exactImportRow = await db.get(
+    `SELECT payload_json
+       FROM tenant_edc_link_imports
+      WHERE tenant_id = ?`,
+    [tenantId],
+  );
+  if (exactImportRow && exactImportRow.payload_json) {
+    try {
+      exactLinkPayload = JSON.parse(exactImportRow.payload_json);
+    } catch {
+      exactLinkPayload = null;
+    }
+  }
+
+  const exactAllocationsBundle = buildExactIntervalAllocations(payload, exactLinkPayload);
+  const baseIntervals = exactAllocationsBundle && Array.isArray(exactAllocationsBundle.intervals)
+    ? exactAllocationsBundle.intervals
+    : (Array.isArray(payload.intervals) ? payload.intervals : []);
+
+  const rawProducers = Array.isArray(payload.producers) ? payload.producers : [];
+  const rawConsumers = Array.isArray(payload.consumers) ? payload.consumers : [];
+  const rawIntervals = baseIntervals;
+
+  const tenantEans = await db.all(
+    "SELECT ean, label, member_name FROM tenant_eans WHERE tenant_id = ?",
+    [tenantId],
+  );
+  const userEans = await db.all(
+    `SELECT ue.ean, ue.label, ue.member_name
+       FROM user_eans ue
+       JOIN users u ON u.id = ue.user_id
+      WHERE u.tenant_id = ?`,
+    [tenantId],
+  );
+
+  const eanLabels = {};
+  for (const row of tenantEans) {
+    const key = normalizeEan(row.ean);
+    if (!key) {
+      continue;
+    }
+    const label = String(row.label || row.member_name || "").trim();
+    if (label) {
+      eanLabels[key] = label;
+    }
+  }
+  for (const row of userEans) {
+    const key = normalizeEan(row.ean);
+    if (!key || eanLabels[key]) {
+      continue;
+    }
+    const label = String(row.label || row.member_name || "").trim();
+    if (label) {
+      eanLabels[key] = label;
+    }
+  }
+
+  const producers = rawProducers.map((producer, index) => ({
+    name: normalizeEan(producer.name),
+    csvIndex: index,
+  }));
+
+  const consumers = rawConsumers.map((consumer, index) => ({
+    name: normalizeEan(consumer.name),
+    csvIndex: index,
+  }));
+
+  const intervals = rawIntervals.map((interval) => {
+    const sourceProducers = Array.isArray(interval.producers) ? interval.producers : [];
+    const sourceConsumers = Array.isArray(interval.consumers) ? interval.consumers : [];
+
+    return {
+      start: Number(interval.start) || 0,
+      producers: sourceProducers.map((item) => ({
+        before: Number(item.before) || 0,
+        after: Number(item.after) || 0,
+        missed: Number(item.missed) || 0,
+      })),
+      consumers: sourceConsumers.map((item) => ({
+        before: Number(item.before) || 0,
+        after: Number(item.after) || 0,
+        missed: Number(item.missed) || 0,
+      })),
+      ...(Array.isArray(interval.exactAllocations) ? { exactAllocations: interval.exactAllocations.map((row) => Array.isArray(row) ? row.map((value) => Number(value) || 0) : []) } : {}),
+      sumProduction: Number(interval.sumProduction) || 0,
+      sumSharing: Number(interval.sumSharing) || 0,
+      sumMissed: Number(interval.sumMissed) || 0,
+    };
+  });
+
+  return {
+    data: {
+      filename: String(importRow.filename || payload.filename || "server-edc.csv"),
+      producers,
+      consumers,
+      intervals,
+      hasExactAllocations: Boolean(exactAllocationsBundle && exactAllocationsBundle.hasExactAllocations),
+      dateFrom: Number(payload.dateFrom) || (intervals.length > 0 ? intervals[0].start : Date.now()),
+      dateTo: Number(payload.dateTo) || (intervals.length > 0 ? intervals[intervals.length - 1].start : Date.now()),
+    },
+    eanLabels,
+    memberScope: null,
+  };
 }
 
 async function resolveTenantScope(req, requestedTenantId) {
@@ -1458,7 +1865,8 @@ async function start() {
     try {
       const tenant = await resolveTenantScope(req, req.query ? req.query.tenantId : null);
       const importInfo = await getTenantEdcImport(tenant.id);
-      res.json({ tenant, importInfo });
+      const linkImportInfo = await getTenantEdcLinkImport(tenant.id);
+      res.json({ tenant, importInfo, linkImportInfo });
     } catch (err) {
       console.error("get-edc-import failed", err);
       res.status(400).json({ error: err instanceof Error ? err.message : "Nepodarilo se nacist EDC import." });
@@ -1484,6 +1892,28 @@ async function start() {
     } catch (err) {
       console.error("import-edc failed", err);
       res.status(400).json({ error: err instanceof Error ? err.message : "Import EDC selhal." });
+    }
+  });
+
+  app.post("/api/admin/import-edc-links", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      const csvText = String((req.body && req.body.csvText) || "");
+      if (!csvText.trim()) {
+        res.status(400).json({ error: "CSV soubor je prazdny." });
+        return;
+      }
+
+      const tenant = await resolveTenantScope(req, req.body && req.body.tenantId);
+      const filename = req.body && typeof req.body.filename === "string" ? req.body.filename : "edc-links.csv";
+      const result = await saveTenantEdcLinkImport(csvText, tenant.id, filename);
+      res.json({
+        ok: true,
+        linkImportInfo: result.importInfo,
+        message: `Presne vazby sdileni pro tenant ${tenant.name} byly ulozeny na server.`,
+      });
+    } catch (err) {
+      console.error("import-edc-links failed", err);
+      res.status(400).json({ error: err instanceof Error ? err.message : "Import vazeb selhal." });
     }
   });
 
@@ -1589,6 +2019,69 @@ async function start() {
     } catch (err) {
       console.error("admin-member-sharing-data failed", err);
       res.status(400).json({ error: err instanceof Error ? err.message : "Nepodarilo se nacist data clena." });
+    }
+  });
+
+  app.get("/api/admin/sharing-groups", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      let tenantIds;
+
+      if (isGlobalAdminRole(req.auth.role)) {
+        const allTenants = await db.all("SELECT id FROM tenants ORDER BY name COLLATE NOCASE");
+        tenantIds = allTenants.map((tenant) => tenant.id);
+      } else {
+        const administered = await getAdministeredTenants(req.auth.userId);
+        if (administered.length === 0 && req.auth.tenant_id) {
+          tenantIds = [req.auth.tenant_id];
+        } else {
+          tenantIds = administered.map((tenant) => tenant.id);
+        }
+      }
+
+      const groups = [];
+      for (const tenantId of tenantIds) {
+        const tenant = await getTenantById(tenantId);
+        if (!tenant) {
+          continue;
+        }
+
+        const importRow = await db.get(
+          `SELECT producer_count, consumer_count, date_from, date_to, imported_at
+             FROM tenant_edc_imports
+            WHERE tenant_id = ?`,
+          [tenantId],
+        );
+        if (!importRow) {
+          continue;
+        }
+
+        groups.push({
+          id: tenant.id,
+          name: tenant.name,
+          producerCount: importRow.producer_count,
+          consumerCount: importRow.consumer_count,
+          dateFrom: importRow.date_from,
+          dateTo: importRow.date_to,
+          importedAt: importRow.imported_at,
+        });
+      }
+
+      res.json({ groups });
+    } catch (err) {
+      console.error("sharing-groups failed", err);
+      res.status(500).json({ error: err instanceof Error ? err.message : "Nepodarilo se nacist skupiny sdileni." });
+    }
+  });
+
+  app.get("/api/admin/sharing-data", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      const requestedGroupId = req.query ? req.query.groupId : null;
+      const tenant = await resolveGroupAccess(req, requestedGroupId);
+      const payload = await buildTenantFullSharingData(tenant.id);
+      res.json(payload);
+    } catch (err) {
+      console.error("admin-sharing-data failed", err);
+      res.status(400).json({ error: err instanceof Error ? err.message : "Nepodarilo se nacist data skupiny sdileni." });
     }
   });
 

@@ -203,6 +203,20 @@ body.auth-locked .app-shell {
   flex-wrap: wrap;
 }
 
+.admin-sharing-flow-card {
+  margin-top: 0.9rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid #dbe5d7;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-sharing-flow-card h3 {
+  margin: 0;
+}
+
 .admin-import-card-first {
   margin-top: 0.2rem;
 }
@@ -353,6 +367,61 @@ body.auth-locked .app-shell {
   gap: 0.35rem;
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.allocation-source-card {
+  margin-bottom: 1rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.allocation-source-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.allocation-source-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.allocation-source-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.7rem;
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+}
+
+.allocation-source-badge.is-exact {
+  background: #e9f8f1;
+  color: #166246;
+  border-color: #9fd7bf;
+}
+
+.allocation-source-badge.is-estimate {
+  background: #fff3dc;
+  color: #9a5a00;
+  border-color: #f3cb7b;
+}
+
+.allocation-source-badge.is-warning {
+  background: #fde7e2;
+  color: #a63b1c;
+  border-color: #efb2a2;
+}
+
+.allocation-source-text {
+  margin: 0;
+  color: var(--muted);
 }
 
 .admin-member-detail {

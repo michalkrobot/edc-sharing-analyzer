@@ -54,16 +54,27 @@
         </section>
       </header>
 
+      <section class="card member-filter-card" id="sharingGroupFilterSection" hidden>
+        <div class="member-filter-toolbar">
+          <label class="member-filter-label" for="sharingGroupSelect">Skupina sdílení:</label>
+          <select id="sharingGroupSelect" class="member-filter-select">
+            <option value="">-- Vyberte skupinu sdílení --</option>
+          </select>
+        </div>
+      </section>
+
       <section class="card controls">
-        <div class="control-grid">
-          <label>
-            CSV report
-            <input id="uploadCsv" type="file" accept=".csv,text/csv" />
-          </label>
-          <label>
-            EAN názvy (vlastní databáze)
-            <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
-          </label>
+        <div id="fileUploadControls">
+          <div class="control-grid">
+            <label>
+              CSV report
+              <input id="uploadCsv" type="file" accept=".csv,text/csv" />
+            </label>
+            <label>
+              EAN názvy (vlastní databáze)
+              <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
+            </label>
+          </div>
         </div>
         <p id="status" class="status">Čekám na nahrání CSV...</p>
         <p id="eanLabelsStatus" class="status" style="font-size: 0.85rem; color: #5f6d5c; margin-top: 0.3rem;">EAN databáze: připraveno</p>
@@ -155,6 +166,15 @@
             <div class="table-wrap"><table id="consumerSummary"></table></div>
           </article>
         </div>
+      </section>
+
+      <section class="card" id="producerDailyTotalsSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Výrobny - Denní souhrn</h2>
+          <span class="sharing-section-chip">Denní sumy</span>
+        </div>
+        <p class="section-description">Sloupcový přehled denních součtů výroby a sdílení.</p>
+        <div id="producerDailyTotalsChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 
       <section class="card" id="sharingSection" hidden>
