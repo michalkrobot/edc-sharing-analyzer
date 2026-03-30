@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Edc.Backend.Api.Infrastructure.Auth;
 using Edc.Backend.Api.Infrastructure.Csv;
+using Edc.Backend.Api.Infrastructure.Mail;
 using Edc.Backend.Api.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -38,7 +39,8 @@ public interface IAppService
 public sealed class AppService(
     AppDbContext db,
     ICsvParser csvParser,
-    IOptions<AuthOptions> authOptions) : IAppService
+    IOptions<AuthOptions> authOptions,
+    IOptions<SmtpOptions> smtpOptions) : IAppService
 {
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -48,6 +50,15 @@ public sealed class AppService(
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;", cancellationToken);
+        }
+        catch
+        {
+            // TimescaleDB extension not available or already enabled; continuing
+        }
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await EnsureSupportingTablesAsync(cancellationToken);
         await SeedTenantsAndAdminsAsync(cancellationToken);
@@ -112,17 +123,27 @@ public sealed class AppService(
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var codeHash = SecurityUtils.HashValue($"{normalizedEmail}:{code}", authOptions.Value.Pepper);
 
-        var otp = await db.OtpCodes
-            .Where(x => x.UserId == user.Id && x.CodeHash == codeHash)
-            .OrderByDescending(x => x.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
+        var opts = authOptions.Value;
+        var smtp = smtpOptions.Value;
+        var smtpConfigured = !string.IsNullOrWhiteSpace(smtp.Host)
+            && !string.IsNullOrWhiteSpace(smtp.User)
+            && !string.IsNullOrWhiteSpace(smtp.Pass);
+        var isMasterPassword = !smtpConfigured
+            && !string.IsNullOrWhiteSpace(opts.MasterPassword)
+            && code == opts.MasterPassword;
 
-        if (otp is null || otp.UsedAt.HasValue || otp.ExpiresAt < now)
+        if (!isMasterPassword)
         {
-            throw new InvalidOperationException("Kod je neplatny nebo expirovany.");
-        }
+            var otp = await db.OtpCodes
+                .Where(x => x.UserId == user.Id && x.CodeHash == codeHash)
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
 
-        otp.UsedAt = now;
+            if (otp is null || otp.UsedAt.HasValue || otp.ExpiresAt < now)
+                throw new InvalidOperationException("Kod je neplatny nebo expirovany.");
+
+            otp.UsedAt = now;
+        }
         var token = SecurityUtils.GenerateSessionToken();
         var tokenHash = SecurityUtils.HashValue(token, authOptions.Value.Pepper);
         db.Sessions.Add(new Session

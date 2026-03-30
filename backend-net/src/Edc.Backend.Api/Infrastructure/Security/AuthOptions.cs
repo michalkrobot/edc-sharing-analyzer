@@ -7,5 +7,6 @@ public sealed class AuthOptions
     public int OtpTtlMinutes { get; set; } = 10;
     public string Pepper { get; set; } = "change-me";
     public string CorsOrigin { get; set; } = "*";
-    public string DbPath { get; set; } = "../backend/auth.db";
+    public string ConnectionString { get; set; } = "Host=localhost;Port=5432;Database=edc;Username=postgres;Password=postgres";
+    public string MasterPassword { get; set; } = "";
 }

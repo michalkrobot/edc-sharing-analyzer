@@ -16,14 +16,11 @@ builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth")
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 
 var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
-var dbPath = Environment.GetEnvironmentVariable("AUTH_DB_PATH") ?? authOptions.DbPath;
-var dbFullPath = Path.GetFullPath(Path.IsPathRooted(dbPath)
-    ? dbPath
-    : Path.Combine(builder.Environment.ContentRootPath, dbPath));
+var connectionString = Environment.GetEnvironmentVariable("CONNECTION_STRING") ?? authOptions.ConnectionString;
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    options.UseSqlite($"Data Source={dbFullPath}");
+    options.UseNpgsql(connectionString);
 });
 
 builder.Services.AddSingleton<ICsvParser, CsvParser>();
@@ -64,6 +61,8 @@ using (var scope = app.Services.CreateScope())
     await service.InitializeAsync();
 }
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseCors();
 
 app.Use(async (context, next) =>
@@ -122,8 +121,8 @@ app.MapGet("/health", () =>
 app.MapAuthEndpoints();
 app.MapMemberEndpoints();
 app.MapAdminEndpoints();
+app.MapFallbackToFile("index.html");
 
 var portRaw = Environment.GetEnvironmentVariable("PORT");
 var port = int.TryParse(portRaw, out var parsedPort) ? parsedPort : authOptions.Port;
-var runUrl = Environment.GetEnvironmentVariable("AUTH_BASE_URL") ?? $"http://localhost:{port}";
-app.Run(runUrl);
+app.Run($"http://0.0.0.0:{port}");

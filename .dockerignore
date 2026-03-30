@@ -1,0 +1,20 @@
+# Git
+.git
+.gitignore
+.github
+
+# .NET build artifacts
+backend-net/src/Edc.Backend.Api/bin/
+backend-net/src/Edc.Backend.Api/obj/
+
+# Local data
+data/
+*.db
+
+# Docs & misc
+*.md
+*.pdf
+*.zip
+*.log
+*.csv
+CNAME

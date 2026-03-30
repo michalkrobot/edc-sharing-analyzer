@@ -14,8 +14,7 @@ public sealed class SmtpEmailSender(ILogger<SmtpEmailSender> logger, IOptions<Sm
             || string.IsNullOrWhiteSpace(_options.User)
             || string.IsNullOrWhiteSpace(_options.Pass))
         {
-            logger.LogWarning("SMTP config missing. OTP codes will be printed to server log.");
-            logger.LogInformation("[AUTH OTP FALLBACK] {Email}: {Code}", email, code);
+            logger.LogWarning("SMTP not configured – email not sent.");
             return;
         }
 

@@ -1,0 +1,30 @@
+# Fly.io configuration – https://fly.io/docs/reference/configuration/
+# Před prvním nasazením uprav `app` na svůj název aplikace.
+app = 'edc-app'
+primary_region = 'fra'
+
+[build]
+
+[env]
+  PORT = '8080'
+  # Citlivé hodnoty nastav přes secrets:
+  # flyctl secrets set CONNECTION_STRING="Host=...;Database=edc;Username=...;Password=..."
+  # flyctl secrets set AUTH_PEPPER="nahodny-dlouhy-string"
+  # flyctl secrets set AUTH_BASE_URL="https://edc-app.fly.dev"
+  # flyctl secrets set SMTP_HOST="smtp.example.com" SMTP_USER="..." SMTP_PASS="..."
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = 'requests'
+    hard_limit = 100
+    soft_limit = 80
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'
