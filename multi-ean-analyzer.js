@@ -5,6 +5,11 @@ const dom = {
   rounds: document.getElementById("rounds"),
   maxFails: document.getElementById("maxFails"),
   restarts: document.getElementById("restarts"),
+  weightCurrentMonth: document.getElementById("weightCurrentMonth"),
+  weightLastYearSameMonth: document.getElementById("weightLastYearSameMonth"),
+  weightRecentWeeks: document.getElementById("weightRecentWeeks"),
+  weightBaseline: document.getElementById("weightBaseline"),
+  historicalWeightsStatus: document.getElementById("historicalWeightsStatus"),
   status: document.getElementById("status"),
   metaSection: document.getElementById("metaSection"),
   summarySection: document.getElementById("summarySection"),
@@ -36,6 +41,8 @@ const dom = {
   timeFilterResetBtn: document.getElementById("timeFilterResetBtn"),
   timeFilterInfo: document.getElementById("timeFilterInfo"),
   allocationsTable: document.getElementById("allocationsTable"),
+  methodologyMatrix: document.getElementById("methodologyMatrix"),
+  methodologyPriorityMatrix: document.getElementById("methodologyPriorityMatrix"),
   simulationResult: document.getElementById("simulationResult"),
   producerConsumerMatrix: document.getElementById("producerConsumerMatrix"),
   consumerChart: document.getElementById("consumerChart"),
@@ -50,6 +57,17 @@ const dom = {
 const pageMode = document.body.dataset.page || "simulation";
 const isSharingLikePage = pageMode === "sharing" || pageMode === "member-sharing";
 const isMemberSharingPage = pageMode === "member-sharing";
+
+// Pre-fill date filters with current calendar month for server-backed pages
+if (isSharingLikePage) {
+  const _now = new Date();
+  const _from = new Date(_now.getFullYear(), _now.getMonth(), 1, 0, 0, 0, 0);
+  const _to   = new Date(_now.getFullYear(), _now.getMonth() + 1, 1, 0, 0, 0, 0);
+  const _pad = (n) => String(n).padStart(2, "0");
+  const _fmt = (d) => `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())}T${_pad(d.getHours())}:${_pad(d.getMinutes())}`;
+  if (dom.filterDateFrom) dom.filterDateFrom.value = _fmt(_from);
+  if (dom.filterDateTo)   dom.filterDateTo.value   = _fmt(_to);
+}
 
 const DEFAULT_EAN_LABELS = {
   "859182400501380873": "Janderka RD Benkov spotr.",
@@ -96,6 +114,8 @@ const DEFAULT_EAN_LABELS = {
 let gData = null;
 let gFilteredData = null;
 let gLastResult = null;
+let gHistoricalModel = null;
+let gHistoricalWeights = null;
 let gEanLabelMap = new Map(Object.entries(DEFAULT_EAN_LABELS));
 let gSelectedProducerName = null;
 let gMemberScope = null;
@@ -566,7 +586,7 @@ function parseDatetimeLocalValue(value) {
 }
 
 function ensureAllocationSourceSection() {
-  if (!isSharingLikePage) {
+  if (!(isSharingLikePage || pageMode === "simulation")) {
     return null;
   }
 
@@ -1127,12 +1147,20 @@ function renderAllocationInputs(data) {
     return;
   }
   dom.simulationSection.hidden = false;
-  const remembered = data.consumers.map((c, idx) => Number.parseFloat(localStorage.getItem(`multi_ean_alloc_${c.name}`) || String((100 / data.consumers.length).toFixed(2) || (idx === 0 ? 100 : 0))));
+  const historicalModel = getHistoricalSharingModel(data);
+  renderMethodologyMatrix(data, historicalModel);
+  const remembered = data.consumers.map((c, idx) => {
+    const storedValue = localStorage.getItem(`multi_ean_alloc_${c.name}`);
+    if (storedValue !== null && storedValue !== "") {
+      return Number.parseFloat(storedValue) || 0;
+    }
+    return historicalModel.suggestedAllocations[idx] || 0;
+  });
 
   const rememberedCost = data.consumers.map((c) => Number.parseFloat(localStorage.getItem(`multi_ean_cost_${c.name}`) || "2"));
 
   dom.allocationsTable.innerHTML =
-    "<thead><tr><th class='ean'>Odběrný EAN</th><th>Alokace [%]</th><th>Cena [Kč/kWh]</th><th>Souhrn</th></tr></thead>";
+    "<thead><tr><th class='ean'>Odběrný EAN</th><th>Preference [%]</th><th>Doporučeno [%]</th><th>Cena [Kč/kWh]</th><th>Prioritní výrobny</th><th>Souhrn</th></tr></thead>";
   const body = document.createElement("tbody");
 
   data.consumers.forEach((c, i) => {
@@ -1140,13 +1168,15 @@ function renderAllocationInputs(data) {
     tr.innerHTML =
       `<td class='ean'>${displayEan(c.name)}</td>
        <td><input data-kind='alloc' data-index='${i}' type='number' min='0' max='100' step='0.01' value='${remembered[i].toFixed(2)}' /></td>
+       <td>${formatPercent(historicalModel.suggestedAllocations[i] || 0)}</td>
        <td><input data-kind='cost' data-index='${i}' type='number' min='0' max='100' step='0.01' value='${rememberedCost[i].toFixed(2)}' /></td>
+       <td class='ean'>${describePrioritySources(data, historicalModel, i)}</td>
        <td id='rowResult_${i}' class='ean'>-</td>`;
     body.appendChild(tr);
   });
 
   const sumRow = document.createElement("tr");
-  sumRow.innerHTML = "<td class='ean'><strong>Součet alokací</strong></td><td id='allocSumCell'><strong>0.00 %</strong></td><td></td><td class='ean'>Musí být <= 100 %</td>";
+  sumRow.innerHTML = "<td class='ean'><strong>Součet alokací</strong></td><td id='allocSumCell'><strong>0.00 %</strong></td><td></td><td></td><td class='ean'>Metodika EDC používá priority po výrobnách a kola sdílení.</td><td></td>";
   body.appendChild(sumRow);
 
   dom.allocationsTable.appendChild(body);
@@ -1183,6 +1213,461 @@ function updateAllocationSum() {
   }
   const cls = s <= 100.0001 ? "value-ok" : "value-danger";
   cell.innerHTML = `<strong class='${cls}'>${s.toFixed(2)} %</strong>`;
+}
+
+const METHODOLOGY_MAX_ROUNDS = 5;
+const MAX_PRIORITY_LINKS = 5;
+const HISTORICAL_WEIGHT_DEFAULTS = {
+  currentMonth: 1.1,
+  lastYearSameMonth: 2.4,
+  recentWeeks: 0.7,
+  baseline: 0.2,
+};
+
+function toCentiKwh(value) {
+  return Math.max(0, Math.floor(((Number(value) || 0) + 1e-9) * 100));
+}
+
+function fromCentiKwh(value) {
+  return (Number(value) || 0) / 100;
+}
+
+function floorPercent(value) {
+  return Math.max(0, Math.floor(((Number(value) || 0) + 1e-9) * 100) / 100);
+}
+
+function normalizePercentRow(values, maxTotal = 100) {
+  const cleaned = values.map((value) => clamp(Number(value) || 0, 0, maxTotal));
+  const total = sum(cleaned);
+  if (total <= maxTotal + 1e-9) {
+    return cleaned.map((value) => floorPercent(value));
+  }
+
+  const ratio = maxTotal / total;
+  return cleaned.map((value) => floorPercent(value * ratio));
+}
+
+function formatPercent(value) {
+  return `${(Number(value) || 0).toFixed(2)} %`;
+}
+
+function formatMonthLabel(date) {
+  return date.toLocaleDateString("cs-CZ", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function sanitizeWeight(value, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return clamp(numeric, 0, 10);
+}
+
+function buildWeightsKey(weights) {
+  return [weights.currentMonth, weights.lastYearSameMonth, weights.recentWeeks, weights.baseline]
+    .map((value) => Number(value).toFixed(3))
+    .join("|");
+}
+
+function readHistoricalWeightsFromInputs() {
+  return {
+    currentMonth: sanitizeWeight(dom.weightCurrentMonth && dom.weightCurrentMonth.value, HISTORICAL_WEIGHT_DEFAULTS.currentMonth),
+    lastYearSameMonth: sanitizeWeight(dom.weightLastYearSameMonth && dom.weightLastYearSameMonth.value, HISTORICAL_WEIGHT_DEFAULTS.lastYearSameMonth),
+    recentWeeks: sanitizeWeight(dom.weightRecentWeeks && dom.weightRecentWeeks.value, HISTORICAL_WEIGHT_DEFAULTS.recentWeeks),
+    baseline: sanitizeWeight(dom.weightBaseline && dom.weightBaseline.value, HISTORICAL_WEIGHT_DEFAULTS.baseline),
+  };
+}
+
+function syncHistoricalWeightsToInputs(weights) {
+  if (dom.weightCurrentMonth) {
+    dom.weightCurrentMonth.value = String(weights.currentMonth);
+  }
+  if (dom.weightLastYearSameMonth) {
+    dom.weightLastYearSameMonth.value = String(weights.lastYearSameMonth);
+  }
+  if (dom.weightRecentWeeks) {
+    dom.weightRecentWeeks.value = String(weights.recentWeeks);
+  }
+  if (dom.weightBaseline) {
+    dom.weightBaseline.value = String(weights.baseline);
+  }
+}
+
+function getHistoricalWeights() {
+  if (!gHistoricalWeights) {
+    gHistoricalWeights = { ...HISTORICAL_WEIGHT_DEFAULTS };
+    syncHistoricalWeightsToInputs(gHistoricalWeights);
+  }
+  return gHistoricalWeights;
+}
+
+function setHistoricalWeights(nextWeights) {
+  gHistoricalWeights = {
+    currentMonth: sanitizeWeight(nextWeights.currentMonth, HISTORICAL_WEIGHT_DEFAULTS.currentMonth),
+    lastYearSameMonth: sanitizeWeight(nextWeights.lastYearSameMonth, HISTORICAL_WEIGHT_DEFAULTS.lastYearSameMonth),
+    recentWeeks: sanitizeWeight(nextWeights.recentWeeks, HISTORICAL_WEIGHT_DEFAULTS.recentWeeks),
+    baseline: sanitizeWeight(nextWeights.baseline, HISTORICAL_WEIGHT_DEFAULTS.baseline),
+  };
+  syncHistoricalWeightsToInputs(gHistoricalWeights);
+  gHistoricalModel = null;
+}
+
+function renderHistoricalWeightsStatus(model) {
+  if (!dom.historicalWeightsStatus) {
+    return;
+  }
+
+  const w = model.weights;
+  dom.historicalWeightsStatus.textContent = `Aktivní váhy: aktuální měsíc ${w.currentMonth.toFixed(2)} | stejný měsíc loni ${w.lastYearSameMonth.toFixed(2)} | poslední 4 týdny ${w.recentWeeks.toFixed(2)} | ostatní ${w.baseline.toFixed(2)}`;
+}
+
+function getMethodologyRoundLimit(data) {
+  const sseSize = (Array.isArray(data && data.producers) ? data.producers.length : 0)
+    + (Array.isArray(data && data.consumers) ? data.consumers.length : 0);
+  if (sseSize > 50) {
+    return 1;
+  }
+  return Math.max(1, Math.min(METHODOLOGY_MAX_ROUNDS, data.consumers.length || 1));
+}
+
+function resolveMethodologyRounds(data, requestedRounds) {
+  const maxRounds = getMethodologyRoundLimit(data);
+  const parsed = Number.parseInt(requestedRounds, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return maxRounds;
+  }
+  return Math.max(1, Math.min(maxRounds, parsed));
+}
+
+function getHistoryReference(intervals) {
+  const now = new Date();
+  const hasCurrentMonthData = intervals.some((interval) => (
+    interval.start.getFullYear() === now.getFullYear()
+    && interval.start.getMonth() === now.getMonth()
+  ));
+  const anchor = hasCurrentMonthData
+    ? new Date(now.getFullYear(), now.getMonth(), 1)
+    : (intervals.length > 0
+      ? new Date(intervals[intervals.length - 1].start.getFullYear(), intervals[intervals.length - 1].start.getMonth(), 1)
+      : new Date(now.getFullYear(), now.getMonth(), 1));
+  const hasYearAgoMonthData = intervals.some((interval) => (
+    interval.start.getFullYear() === anchor.getFullYear() - 1
+    && interval.start.getMonth() === anchor.getMonth()
+  ));
+
+  return {
+    anchor,
+    hasCurrentMonthData,
+    hasYearAgoMonthData,
+  };
+}
+
+function getHistoricalIntervalWeight(start, historyReference, weights) {
+  const sameCurrentMonth = start.getFullYear() === historyReference.anchor.getFullYear()
+    && start.getMonth() === historyReference.anchor.getMonth();
+  if (sameCurrentMonth) {
+    return weights.currentMonth;
+  }
+
+  const sameMonthLastYear = start.getFullYear() === historyReference.anchor.getFullYear() - 1
+    && start.getMonth() === historyReference.anchor.getMonth();
+  if (sameMonthLastYear && historyReference.hasYearAgoMonthData) {
+    return weights.lastYearSameMonth;
+  }
+
+  const dayDiff = Math.abs(historyReference.anchor.getTime() - start.getTime()) / 86400000;
+  if (dayDiff <= 28) {
+    return weights.recentWeeks;
+  }
+
+  return weights.baseline;
+}
+
+function buildEstimatedIntervalAllocationMatrix(interval) {
+  const producerCount = Array.isArray(interval.producers) ? interval.producers.length : 0;
+  const consumerCount = Array.isArray(interval.consumers) ? interval.consumers.length : 0;
+  const matrix = Array.from({ length: producerCount }, () => Array(consumerCount).fill(0));
+  const totalConsumerReceived = interval.consumers.reduce(
+    (sumValue, consumer) => sumValue + Math.max(0, (Number(consumer.before) || 0) - (Number(consumer.after) || 0)),
+    0,
+  );
+
+  if (totalConsumerReceived < 0.001) {
+    return matrix;
+  }
+
+  for (let producerIndex = 0; producerIndex < producerCount; producerIndex += 1) {
+    const producerShared = Math.max(
+      0,
+      (Number(interval.producers[producerIndex] && interval.producers[producerIndex].before) || 0)
+      - (Number(interval.producers[producerIndex] && interval.producers[producerIndex].after) || 0),
+    );
+    if (producerShared < 0.001) {
+      continue;
+    }
+
+    for (let consumerIndex = 0; consumerIndex < consumerCount; consumerIndex += 1) {
+      const consumerShared = Math.max(
+        0,
+        (Number(interval.consumers[consumerIndex] && interval.consumers[consumerIndex].before) || 0)
+        - (Number(interval.consumers[consumerIndex] && interval.consumers[consumerIndex].after) || 0),
+      );
+      if (consumerShared < 0.001) {
+        continue;
+      }
+      matrix[producerIndex][consumerIndex] = producerShared * (consumerShared / totalConsumerReceived);
+    }
+  }
+
+  return matrix;
+}
+
+function getIntervalAllocationMatrix(data, interval) {
+  const shouldUseExactAllocations = getAllocationModeInfo(data).effectiveMode === "exact";
+  if (shouldUseExactAllocations && Array.isArray(interval.exactAllocations)) {
+    return interval.exactAllocations.map((row) => Array.isArray(row)
+      ? row.map((value) => Number(value) || 0)
+      : Array(data.consumers.length).fill(0));
+  }
+  return buildEstimatedIntervalAllocationMatrix(interval);
+}
+
+function buildHistoricalSharingModel(data) {
+  const historyReference = getHistoryReference(data.intervals);
+  const weights = getHistoricalWeights();
+  const producerCount = data.producers.length;
+  const consumerCount = data.consumers.length;
+  const weightedPairShared = Array.from({ length: producerCount }, () => Array(consumerCount).fill(0));
+  const weightedProducerSupply = Array(producerCount).fill(0);
+  const weightedConsumerNeed = Array(consumerCount).fill(0);
+  const weightedConsumerShared = Array(consumerCount).fill(0);
+
+  for (const interval of data.intervals) {
+    const weight = getHistoricalIntervalWeight(interval.start, historyReference, weights);
+    const matrix = getIntervalAllocationMatrix(data, interval);
+
+    for (let producerIndex = 0; producerIndex < producerCount; producerIndex += 1) {
+      const producerBefore = Math.max(0, Number(interval.producers[producerIndex] && interval.producers[producerIndex].before) || 0);
+      weightedProducerSupply[producerIndex] += producerBefore * weight;
+
+      for (let consumerIndex = 0; consumerIndex < consumerCount; consumerIndex += 1) {
+        const shared = Number(matrix[producerIndex] && matrix[producerIndex][consumerIndex]) || 0;
+        weightedPairShared[producerIndex][consumerIndex] += shared * weight;
+        weightedConsumerShared[consumerIndex] += shared * weight;
+      }
+    }
+
+    for (let consumerIndex = 0; consumerIndex < consumerCount; consumerIndex += 1) {
+      weightedConsumerNeed[consumerIndex] += Math.max(0, Number(interval.consumers[consumerIndex] && interval.consumers[consumerIndex].before) || 0) * weight;
+    }
+  }
+
+  const consumerNeedDenominator = sum(weightedConsumerNeed);
+  const fallbackNeedDistribution = consumerNeedDenominator > 0.001
+    ? normalizePercentRow(weightedConsumerNeed.map((value) => (value / consumerNeedDenominator) * 100))
+    : normalizePercentRow(Array.from({ length: consumerCount }, () => 100 / Math.max(consumerCount, 1)));
+
+  const baseAllocations = weightedPairShared.map((row, producerIndex) => {
+    const baseDenominator = weightedProducerSupply[producerIndex] > 0.001
+      ? weightedProducerSupply[producerIndex]
+      : row.reduce((sumValue, value) => sumValue + value, 0);
+    if (baseDenominator <= 0.001) {
+      return fallbackNeedDistribution.slice();
+    }
+    const normalizedRow = normalizePercentRow(row.map((value) => (value / baseDenominator) * 100));
+    if (sum(normalizedRow) <= 0.001) {
+      return fallbackNeedDistribution.slice();
+    }
+    return normalizedRow;
+  });
+
+  const suggestedBase = sum(weightedConsumerShared) > 0.001
+    ? weightedConsumerShared
+    : weightedConsumerNeed;
+  const suggestedDenominator = sum(suggestedBase);
+  const suggestedAllocations = suggestedDenominator > 0.001
+    ? normalizePercentRow(suggestedBase.map((value) => (value / suggestedDenominator) * 100))
+    : normalizePercentRow(Array.from({ length: consumerCount }, () => 100 / Math.max(consumerCount, 1)));
+
+  const fallbackProducerOrder = weightedProducerSupply
+    .map((value, producerIndex) => ({ producerIndex, value }))
+    .sort((a, b) => b.value - a.value)
+    .map((item) => item.producerIndex);
+
+  const prioritiesByConsumer = Array.from({ length: consumerCount }, (_unused, consumerIndex) => {
+    const ranked = weightedPairShared
+      .map((row, producerIndex) => ({
+        producerIndex,
+        shared: row[consumerIndex],
+        allocation: baseAllocations[producerIndex][consumerIndex],
+      }))
+      .filter((item) => item.shared > 0.001 || item.allocation > 0.009)
+      .sort((a, b) => b.shared - a.shared || b.allocation - a.allocation)
+      .slice(0, MAX_PRIORITY_LINKS)
+      .map((item) => item.producerIndex);
+
+    if (ranked.length > 0) {
+      return ranked;
+    }
+
+    return fallbackProducerOrder.slice(0, Math.min(MAX_PRIORITY_LINKS, fallbackProducerOrder.length));
+  });
+
+  const referenceLabel = formatMonthLabel(historyReference.anchor);
+  const sourceSummary = historyReference.hasYearAgoMonthData
+    ? `historie skupiny: ${referenceLabel} + silnější váha stejného měsíce ${historyReference.anchor.getFullYear() - 1}`
+    : `historie skupiny: ${referenceLabel} + fallback posledních 4 týdnů`;
+
+  return {
+    sourceData: data,
+    weights,
+    weightsKey: buildWeightsKey(weights),
+    referenceLabel,
+    sourceSummary,
+    hasCurrentMonthData: historyReference.hasCurrentMonthData,
+    hasYearAgoMonthData: historyReference.hasYearAgoMonthData,
+    weightedPairShared,
+    baseAllocations,
+    prioritiesByConsumer,
+    suggestedAllocations,
+  };
+}
+
+function getHistoricalSharingModel(data) {
+  const activeWeights = getHistoricalWeights();
+  const activeWeightsKey = buildWeightsKey(activeWeights);
+  if (gHistoricalModel && gHistoricalModel.sourceData === data && gHistoricalModel.weightsKey === activeWeightsKey) {
+    return gHistoricalModel;
+  }
+  gHistoricalModel = buildHistoricalSharingModel(data);
+  return gHistoricalModel;
+}
+
+function renderMethodologyMatrix(data, model) {
+  if (!dom.methodologyMatrix || !dom.methodologyPriorityMatrix) {
+    return;
+  }
+
+  dom.methodologyMatrix.innerHTML = "";
+  dom.methodologyPriorityMatrix.innerHTML = "";
+
+  const matrixHead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  headRow.innerHTML = "<th class='ean'>Výrobní EAN</th>";
+  data.consumers.forEach((consumer) => {
+    const th = document.createElement("th");
+    th.className = "ean";
+    th.textContent = displayEan(consumer.name);
+    headRow.appendChild(th);
+  });
+  const totalHead = document.createElement("th");
+  totalHead.textContent = "Součet klíče";
+  headRow.appendChild(totalHead);
+  matrixHead.appendChild(headRow);
+  dom.methodologyMatrix.appendChild(matrixHead);
+
+  const matrixBody = document.createElement("tbody");
+  data.producers.forEach((producer, producerIndex) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td class='ean'>${displayEan(producer.name)}</td>`;
+    let rowSum = 0;
+    for (let consumerIndex = 0; consumerIndex < data.consumers.length; consumerIndex += 1) {
+      const cellValue = Number(model.baseAllocations[producerIndex][consumerIndex]) || 0;
+      rowSum += cellValue;
+      const td = document.createElement("td");
+      td.textContent = formatPercent(cellValue);
+      row.appendChild(td);
+    }
+    const sumCell = document.createElement("td");
+    sumCell.innerHTML = `<strong>${formatPercent(rowSum)}</strong>`;
+    row.appendChild(sumCell);
+    matrixBody.appendChild(row);
+  });
+  dom.methodologyMatrix.appendChild(matrixBody);
+
+  const priorityHead = document.createElement("thead");
+  const priorityHeadRow = document.createElement("tr");
+  priorityHeadRow.innerHTML = "<th class='ean'>Odběrný EAN</th><th>Doporučeno [%]</th><th>Priorita 1</th><th>Priorita 2</th><th>Priorita 3</th><th>Priorita 4</th><th>Priorita 5</th>";
+  priorityHead.appendChild(priorityHeadRow);
+  dom.methodologyPriorityMatrix.appendChild(priorityHead);
+
+  const priorityBody = document.createElement("tbody");
+  data.consumers.forEach((consumer, consumerIndex) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td class='ean'>${displayEan(consumer.name)}</td><td>${formatPercent(model.suggestedAllocations[consumerIndex] || 0)}</td>`;
+    const priorities = model.prioritiesByConsumer[consumerIndex] || [];
+    for (let priorityIndex = 0; priorityIndex < MAX_PRIORITY_LINKS; priorityIndex += 1) {
+      const producerIndex = priorities[priorityIndex];
+      const td = document.createElement("td");
+      if (Number.isInteger(producerIndex)) {
+        td.className = "ean";
+        td.textContent = displayEan(data.producers[producerIndex].name);
+      } else {
+        td.textContent = "-";
+      }
+      row.appendChild(td);
+    }
+    priorityBody.appendChild(row);
+  });
+  dom.methodologyPriorityMatrix.appendChild(priorityBody);
+
+  renderHistoricalWeightsStatus(model);
+}
+
+function buildSimulationPlan(data, consumerPreferences) {
+  const model = getHistoricalSharingModel(data);
+  const preferenceFactors = model.suggestedAllocations.map((suggestedValue, index) => {
+    const requestedValue = clamp(Number(consumerPreferences[index]) || 0, 0, 100);
+    if (suggestedValue > 0.001) {
+      return requestedValue / suggestedValue;
+    }
+    return requestedValue > 0 ? 1 + requestedValue / 100 : 0;
+  });
+
+  const matrix = model.baseAllocations.map((row) => normalizePercentRow(
+    row.map((value, consumerIndex) => value * preferenceFactors[consumerIndex]),
+  ));
+
+  const prioritiesByConsumer = Array.from({ length: data.consumers.length }, (_unused, consumerIndex) => {
+    const ranked = data.producers
+      .map((_producer, producerIndex) => ({
+        producerIndex,
+        allocation: matrix[producerIndex][consumerIndex],
+        historyWeight: model.weightedPairShared[producerIndex][consumerIndex],
+      }))
+      .filter((item) => item.allocation > 0.009)
+      .sort((a, b) => b.historyWeight - a.historyWeight || b.allocation - a.allocation)
+      .slice(0, MAX_PRIORITY_LINKS)
+      .map((item) => item.producerIndex);
+
+    if (ranked.length > 0) {
+      return ranked;
+    }
+    return model.prioritiesByConsumer[consumerIndex] || [];
+  });
+
+  return {
+    matrix,
+    prioritiesByConsumer,
+    suggestedAllocations: model.suggestedAllocations,
+    sourceSummary: model.sourceSummary,
+  };
+}
+
+function describePrioritySources(data, model, consumerIndex) {
+  const priorities = model.prioritiesByConsumer[consumerIndex] || [];
+  if (priorities.length === 0) {
+    return "Bez historie, použije se průběžná optimalizace podle odběru.";
+  }
+
+  return priorities.map((producerIndex, priorityIndex) => {
+    const producer = data.producers[producerIndex];
+    const allocation = model.baseAllocations[producerIndex][consumerIndex] || 0;
+    return `${priorityIndex + 1}. ${displayEan(producer.name)} (${formatPercent(allocation)})`;
+  }).join("<br>");
 }
 
 function proportionalTake(producerRemaining, amount) {
@@ -1234,48 +1719,74 @@ function simulateSharing(data, allocations, costsPerKwh, rounds) {
   assert(allocations.length === data.consumers.length, "Nesedí počet alokací a odběrných EAN.");
   assert(sum(allocations) <= 100.0001, `Soucet alokaci musi byt <= 100. Aktualne: ${sum(allocations).toFixed(2)} %`);
 
+  const roundsUsed = resolveMethodologyRounds(data, rounds);
+  const plan = buildSimulationPlan(data, allocations);
   const sharingPerConsumer = Array(data.consumers.length).fill(0);
   const sharingPerProducer = Array(data.producers.length).fill(0);
   const producerToConsumer = Array.from({ length: data.producers.length }, () =>
     Array(data.consumers.length).fill(0),
   );
-  const perRoundPerEan = Array.from({ length: rounds }, () => Array(data.consumers.length).fill(0));
+  const perRoundPerEan = Array.from({ length: roundsUsed }, () => Array(data.consumers.length).fill(0));
   const intervalTotals = [];
 
   for (const interval of data.intervals) {
-    const producerRemaining = interval.producers.map((p) => Math.round(p.before * 100));
-    const remaining = interval.consumers.map((c) => Math.round(c.before * 100));
+    const producerRemaining = interval.producers.map((producer) => toCentiKwh(producer.before));
+    const remaining = interval.consumers.map((consumer) => toCentiKwh(consumer.before));
     const intervalProduction = sum(producerRemaining) / 100;
     const intervalConsumption = sum(remaining) / 100;
     let intervalShared = 0;
 
-    for (let round = 0; round < rounds; round += 1) {
-      const energyThisRound = sum(producerRemaining);
-      if (energyThisRound <= 0) {
+    for (let round = 0; round < roundsUsed; round += 1) {
+      if (sum(producerRemaining) <= 0) {
         break;
       }
 
-      for (let i = 0; i < allocations.length; i += 1) {
-        const quota = Math.trunc((energyThisRound * allocations[i]) / 100);
-        const shared = Math.min(remaining[i], quota);
-        if (shared <= 0) {
-          continue;
+      const producerBeforeRound = producerRemaining.slice();
+      const producerSharedThisRound = Array(data.producers.length).fill(0);
+      let sharedThisRound = 0;
+
+      for (let priorityIndex = 0; priorityIndex < MAX_PRIORITY_LINKS; priorityIndex += 1) {
+        for (let consumerIndex = 0; consumerIndex < data.consumers.length; consumerIndex += 1) {
+          if (remaining[consumerIndex] <= 0) {
+            continue;
+          }
+
+          const producerIndex = plan.prioritiesByConsumer[consumerIndex] && plan.prioritiesByConsumer[consumerIndex][priorityIndex];
+          if (!Number.isInteger(producerIndex)) {
+            continue;
+          }
+
+          const allocationPercent = Number(plan.matrix[producerIndex] && plan.matrix[producerIndex][consumerIndex]) || 0;
+          if (allocationPercent <= 0) {
+            continue;
+          }
+
+          const quota = Math.trunc((producerBeforeRound[producerIndex] * allocationPercent) / 100);
+          const producerStillAvailable = producerRemaining[producerIndex] - producerSharedThisRound[producerIndex];
+          const shared = Math.min(remaining[consumerIndex], quota, producerStillAvailable);
+          if (shared <= 0) {
+            continue;
+          }
+
+          remaining[consumerIndex] -= shared;
+          producerSharedThisRound[producerIndex] += shared;
+          sharedThisRound += shared;
+          intervalShared += fromCentiKwh(shared);
+          perRoundPerEan[round][consumerIndex] += fromCentiKwh(shared);
+
+          const kwh = fromCentiKwh(shared);
+          sharingPerProducer[producerIndex] += kwh;
+          producerToConsumer[producerIndex][consumerIndex] += kwh;
+          sharingPerConsumer[consumerIndex] += kwh;
         }
+      }
 
-        remaining[i] -= shared;
-        intervalShared += shared / 100;
-        perRoundPerEan[round][i] += shared / 100;
+      for (let producerIndex = 0; producerIndex < producerRemaining.length; producerIndex += 1) {
+        producerRemaining[producerIndex] = Math.max(0, producerRemaining[producerIndex] - producerSharedThisRound[producerIndex]);
+      }
 
-        const takeFromProducers = proportionalTake(producerRemaining, shared);
-        for (let p = 0; p < takeFromProducers.length; p += 1) {
-          const take = takeFromProducers[p];
-          producerRemaining[p] -= take;
-          const kwh = take / 100;
-          sharingPerProducer[p] += kwh;
-          producerToConsumer[p][i] += kwh;
-        }
-
-        sharingPerConsumer[i] += shared / 100;
+      if (sharedThisRound <= 0) {
+        break;
       }
     }
 
@@ -1297,11 +1808,14 @@ function simulateSharing(data, allocations, costsPerKwh, rounds) {
     intervalTotals,
     totalSharing: sum(sharingPerConsumer),
     totalProfit: sum(profitPerEan),
+    roundsUsed,
+    plan,
   };
 }
 
 function simulateFastTotalProfit(data, allocations, costsPerKwh, rounds) {
-  return simulateSharing(data, allocations, costsPerKwh, rounds).totalProfit;
+  const result = simulateSharing(data, allocations, costsPerKwh, rounds);
+  return result.totalSharing * 1000000 + result.totalProfit;
 }
 
 function randomWeights(size) {
@@ -3035,6 +3549,31 @@ function triggerCsvDownload(filename, content) {
   URL.revokeObjectURL(url);
 }
 
+function getCurrentMonthRangeMs() {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const to   = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+  return { from: from.getTime(), to: to.getTime() };
+}
+
+function setCurrentMonthFilter() {
+  if (!dom.filterDateFrom || !dom.filterDateTo) return;
+  const { from, to } = getCurrentMonthRangeMs();
+  dom.filterDateFrom.value = toDatetimeLocalValue(new Date(from));
+  dom.filterDateTo.value   = toDatetimeLocalValue(new Date(to));
+  syncTimeThermometerFromInputs();
+}
+
+function getActiveDateRangeMs() {
+  const { from: defFrom, to: defTo } = getCurrentMonthRangeMs();
+  const fromDate = dom.filterDateFrom ? parseDatetimeLocalValue(dom.filterDateFrom.value) : null;
+  const toDate   = dom.filterDateTo   ? parseDatetimeLocalValue(dom.filterDateTo.value)   : null;
+  return {
+    from: fromDate ? fromDate.getTime() : defFrom,
+    to:   toDate   ? toDate.getTime()   : defTo,
+  };
+}
+
 function resetTimeFilterToFullRange() {
   if (!gData || !dom.filterDateFrom || !dom.filterDateTo) {
     return;
@@ -3250,6 +3789,7 @@ function onDataLoaded(data) {
   gData = data;
   gFilteredData = null;
   gLastResult = null;
+  gHistoricalModel = null;
   gSelectedProducerName = null;
   if (!isMemberSharingPage) {
     gMemberScope = null;
@@ -3282,7 +3822,18 @@ function onDataLoaded(data) {
     if (dom.timeFilterSection) {
       dom.timeFilterSection.hidden = false;
     }
-    resetTimeFilterToFullRange();
+    if (data._serverFiltered) {
+      // Data loaded from server with date range – sync filter inputs from returned dateFrom/dateTo
+      if (dom.filterDateFrom && data.dateFrom) {
+        dom.filterDateFrom.value = toDatetimeLocalValue(new Date(Number(data.dateFrom)));
+      }
+      if (dom.filterDateTo && data.dateTo) {
+        dom.filterDateTo.value = toDatetimeLocalValue(new Date(Number(data.dateTo)));
+      }
+      syncTimeThermometerFromInputs();
+    } else {
+      resetTimeFilterToFullRange();
+    }
     applyTimeFilterAndRender();
   } else {
     renderMeta(data);
@@ -3290,6 +3841,12 @@ function onDataLoaded(data) {
   }
 
   if (pageMode === "simulation") {
+    if (dom.rounds) {
+      const recommendedRounds = getMethodologyRoundLimit(data);
+      dom.rounds.value = String(recommendedRounds);
+      dom.rounds.max = String(recommendedRounds);
+      dom.rounds.title = `Dle metodiky EDC lze pro tuto SSE použít maximálně ${recommendedRounds} kol.`;
+    }
     renderAllocationInputs(data);
   }
 
@@ -3324,8 +3881,8 @@ function onDataLoaded(data) {
   }
   if (dom.optProgress && !isSharingLikePage) {
     dom.optProgress.textContent =
-      isSharingLikePage
-        ? "Zobrazen přehled výroben: sdílení a zůstatek po sdílení. Ušlá příležitost je v detailu po najetí myší."
+      pageMode === "simulation"
+        ? `Připraven metodický návrh simulace | ${getHistoricalSharingModel(data).sourceSummary} | doporučeno ${getMethodologyRoundLimit(data)} kol.`
         : "Zobrazen graf sdílení za výrobny z nahraných dat (bez simulace).";
   }
 }
@@ -3372,6 +3929,7 @@ function hydrateServerSharingData(payload) {
     hasExactAllocations: Boolean(payload.hasExactAllocations),
     dateFrom: Number.isFinite(Number(payload.dateFrom)) ? new Date(Number(payload.dateFrom)) : fallbackFrom,
     dateTo: Number.isFinite(Number(payload.dateTo)) ? new Date(Number(payload.dateTo)) : fallbackTo,
+    _serverFiltered: true,
   };
 }
 
@@ -3379,11 +3937,12 @@ function clearAllDataSections() {
   gData = null;
   gFilteredData = null;
   gLastResult = null;
+  gHistoricalModel = null;
   gMemberScope = null;
   renderAllocationSourceInfo(null);
 
   const sectionIds = [
-    "metaSection", "summarySection", "sharingSection", "timeFilterSection",
+    "metaSection", "summarySection", "sharingSection", "simulationSection", "timeFilterSection",
     "producerPieChartsSection", "producerConsumerPieChartsSection", "consumerProducerPieChartsSection",
     "producerDailyTotalsSection", "consumerDailyTotalsSection",
     "bestDaySection", "consumerBestDaySection", "averageDaySection", "consumerAverageDaySection",
@@ -3391,6 +3950,16 @@ function clearAllDataSections() {
   for (const id of sectionIds) {
     const el = document.getElementById(id);
     if (el) el.hidden = true;
+  }
+
+  if (dom.methodologyMatrix) {
+    dom.methodologyMatrix.innerHTML = "";
+  }
+  if (dom.methodologyPriorityMatrix) {
+    dom.methodologyPriorityMatrix.innerHTML = "";
+  }
+  if (dom.historicalWeightsStatus) {
+    dom.historicalWeightsStatus.textContent = "";
   }
 }
 
@@ -3423,12 +3992,13 @@ async function loadMemberSharingData() {
 
   console.log("[EDC-ANALYZER] loadMemberSharingData: selectedMemberId=", selectedMemberId, "isAdmin=", isAdmin);
 
-  let endpoint = "/member/sharing-data";
+  const { from: dateFrom, to: dateTo } = getActiveDateRangeMs();
+  let endpoint = `/member/sharing-data?dateFrom=${dateFrom}&dateTo=${dateTo}`;
   if (selectedMemberId && isAdmin) {
     const tenantId = (window.edcAuth && typeof window.edcAuth.getUser === "function"
       ? (window.edcAuth.getUser() && window.edcAuth.getUser().tenantId)
       : null) || (window.edcAuthState && window.edcAuthState.user && window.edcAuthState.user.tenantId) || "";
-    endpoint = `/admin/member-sharing-data?tenantId=${encodeURIComponent(tenantId)}&memberId=${encodeURIComponent(selectedMemberId)}`;
+    endpoint = `/admin/member-sharing-data?tenantId=${encodeURIComponent(tenantId)}&memberId=${encodeURIComponent(selectedMemberId)}&dateFrom=${dateFrom}&dateTo=${dateTo}`;
     console.log("[EDC-ANALYZER] Loading member data with endpoint:", endpoint);
   } else if (!selectedMemberId && isAdmin) {
     console.log("[EDC-ANALYZER] Admin with no member selected, waiting for selection...");
@@ -3475,7 +4045,7 @@ async function loadMemberSharingData() {
 }
 
 async function loadAdminGroupSharingData() {
-  if (pageMode !== "sharing") {
+  if (!["sharing", "simulation"].includes(pageMode)) {
     return;
   }
 
@@ -3510,7 +4080,8 @@ async function loadAdminGroupSharingData() {
   }
 
   const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
-  const response = await fetch(`${apiBase}/admin/sharing-data?groupId=${encodeURIComponent(selectedGroupId)}`, {
+  const { from: dateFrom, to: dateTo } = getActiveDateRangeMs();
+  const response = await fetch(`${apiBase}/admin/sharing-data?groupId=${encodeURIComponent(selectedGroupId)}&dateFrom=${dateFrom}&dateTo=${dateTo}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -3574,15 +4145,35 @@ if (dom.uploadCsv) {
   });
 }
 
+function reloadServerDataWithCurrentFilter() {
+  if (isMemberSharingPage) {
+    gEanLabelMapReady.then(() => loadMemberSharingData()).catch((err) => {
+      if (dom.status) dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+    });
+  } else if (["sharing", "simulation"].includes(pageMode)) {
+    gEanLabelMapReady.then(() => loadAdminGroupSharingData()).catch((err) => {
+      if (dom.status) dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+    });
+  }
+}
+
 if (dom.filterDateFrom) {
   dom.filterDateFrom.addEventListener("change", () => {
-    applyTimeFilterAndRender();
+    if (isSharingLikePage) {
+      reloadServerDataWithCurrentFilter();
+    } else {
+      applyTimeFilterAndRender();
+    }
   });
 }
 
 if (dom.filterDateTo) {
   dom.filterDateTo.addEventListener("change", () => {
-    applyTimeFilterAndRender();
+    if (isSharingLikePage) {
+      reloadServerDataWithCurrentFilter();
+    } else {
+      applyTimeFilterAndRender();
+    }
   });
 }
 
@@ -3605,14 +4196,37 @@ if (dom.timeFilterResetBtn) {
     if (!gData) {
       return;
     }
-    resetTimeFilterToFullRange();
-    applyTimeFilterAndRender();
+    if (isSharingLikePage) {
+      setCurrentMonthFilter();
+      reloadServerDataWithCurrentFilter();
+    } else {
+      resetTimeFilterToFullRange();
+      applyTimeFilterAndRender();
+    }
   });
 }
 
 document.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  if (target.dataset.kind === "hist-weight") {
+    const nextWeights = readHistoricalWeightsFromInputs();
+    setHistoricalWeights(nextWeights);
+    if (pageMode === "simulation" && gData) {
+      renderAllocationInputs(gData);
+      if (gLastResult) {
+        const rounds = Number.parseInt(dom.rounds.value, 10);
+        const { allocations, costs } = readAllocationInputs();
+        const refreshed = simulateSharing(gData, allocations, costs, rounds);
+        refreshed.allocations = allocations.slice();
+        gLastResult = refreshed;
+        renderSimulationResult(gData, refreshed);
+        renderProducerConsumerMatrix(gData, refreshed);
+        renderCharts(gData, refreshed);
+      }
+    }
     return;
   }
   if (target.dataset.kind === "alloc" || target.dataset.kind === "cost") {
@@ -3804,7 +4418,7 @@ if (dom.simulateBtn) {
     result.allocations = allocations.slice();
     gLastResult = result;
     if (dom.optProgress) {
-      dom.optProgress.textContent = "Simulace dokončena.";
+      dom.optProgress.textContent = `Simulace dokončena | ${result.plan.sourceSummary} | kola: ${result.roundsUsed} | sdíleno: ${result.totalSharing.toFixed(2)} kWh.`;
     }
     if (dom.exportBtn) {
       dom.exportBtn.disabled = false;
@@ -3839,7 +4453,7 @@ if (dom.optimizeBtn) {
     setTimeout(() => {
       const result = optimizeAllocations(gData, costs, rounds, maxFails, restarts, (step, total, best) => {
         if (dom.optProgress) {
-          dom.optProgress.textContent = `Optimalizace ${step}/${total} | Nejlepší zisk: ${best.totalProfit.toFixed(2)} Kč`;
+          dom.optProgress.textContent = `Optimalizace ${step}/${total} | Nejlepší sdílení: ${best.totalSharing.toFixed(2)} kWh | Zisk: ${best.totalProfit.toFixed(2)} Kč`;
         }
       });
 
@@ -3859,7 +4473,7 @@ if (dom.optimizeBtn) {
       renderProducerConsumerMatrix(gData, result);
       renderCharts(gData, result);
       if (dom.optProgress) {
-        dom.optProgress.textContent = `HOTOVO | Nejlepší zisk: ${result.totalProfit.toFixed(2)} Kč | Sdíleno: ${result.totalSharing.toFixed(2)} kWh`;
+        dom.optProgress.textContent = `HOTOVO | Nejlepší sdílení: ${result.totalSharing.toFixed(2)} kWh | Zisk: ${result.totalProfit.toFixed(2)} Kč | ${result.plan.sourceSummary}`;
       }
     }, 20);
   } catch (err) {
@@ -3926,7 +4540,7 @@ if (isMemberSharingPage) {
   };
 }
 
-if (pageMode === "sharing") {
+if (["sharing", "simulation"].includes(pageMode)) {
   window.addEventListener("edc-auth-state", () => {
     gEanLabelMapReady
       .then(() => loadAdminGroupSharingData())

@@ -252,7 +252,8 @@ public static class AdminEndpoints
                 return Results.Json(new { error = "Clen neexistuje v teto tenanta nebo neni aktivni." }, statusCode: StatusCodes.Status403Forbidden);
             }
 
-            var payload = await service.BuildMemberSharingDataAsync(memberId, parsedTenantId, cancellationToken);
+            var (dateFrom, dateTo) = ParseDateRangeParams(context);
+            var payload = await service.BuildMemberSharingDataAsync(memberId, parsedTenantId, dateFrom, dateTo, cancellationToken);
             return Results.Ok(payload);
         }
         catch (InvalidOperationException ex)
@@ -286,13 +287,25 @@ public static class AdminEndpoints
         {
             var tenant = await service.ResolveGroupAccessAsync(authResult.Auth!, groupId, cancellationToken);
             var tenantId = (int)(tenant.GetType().GetProperty("id")?.GetValue(tenant) ?? 0);
-            var payload = await service.BuildTenantFullSharingDataAsync(tenantId, cancellationToken);
+            var (dateFrom, dateTo) = ParseDateRangeParams(context);
+            var payload = await service.BuildTenantFullSharingDataAsync(tenantId, dateFrom, dateTo, cancellationToken);
             return Results.Ok(payload);
         }
         catch (InvalidOperationException ex)
         {
             return Results.BadRequest(new { error = ex.Message });
         }
+    }
+
+    private static (long DateFrom, long DateTo) ParseDateRangeParams(HttpContext context)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var defaultFrom = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        var defaultTo = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero).AddMonths(1).ToUnixTimeMilliseconds();
+
+        var from = long.TryParse(context.Request.Query["dateFrom"].ToString(), out var pf) && pf > 0 ? pf : defaultFrom;
+        var to = long.TryParse(context.Request.Query["dateTo"].ToString(), out var pt) && pt > 0 ? pt : defaultTo;
+        return (from, to);
     }
 
     private static (AuthPrincipal? Auth, IResult? Result) RequireAdmin(HttpContext context)

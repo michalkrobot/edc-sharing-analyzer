@@ -6,6 +6,8 @@ using Edc.Backend.Api.Infrastructure.Mail;
 using Edc.Backend.Api.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace Edc.Backend.Api.Infrastructure.Persistence;
 
@@ -26,8 +28,8 @@ public interface IAppService
     Task<object?> GetEdcImportInfoAsync(AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
     Task<object> SaveEdcImportAsync(string csvText, string filename, AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
     Task<object> SaveEdcLinkImportAsync(string csvText, string filename, AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
-    Task<object> BuildMemberSharingDataAsync(int userId, int tenantId, CancellationToken cancellationToken = default);
-    Task<object> BuildTenantFullSharingDataAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task<object> BuildMemberSharingDataAsync(int userId, int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
+    Task<object> BuildTenantFullSharingDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
     Task<object> ResolveTenantScopeAsync(AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
     Task<object> ResolveGroupAccessAsync(AuthPrincipal auth, string? groupId, CancellationToken cancellationToken = default);
     Task<List<object>> ListTenantsWithAdminsAsync(CancellationToken cancellationToken = default);
@@ -50,37 +52,8 @@ public sealed class AppService(
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await db.Database.ExecuteSqlRawAsync(
-                "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;", cancellationToken);
-        }
-        catch
-        {
-            // TimescaleDB extension not available or already enabled; continuing
-        }
-        await db.Database.EnsureCreatedAsync(cancellationToken);
-        await EnsureSupportingTablesAsync(cancellationToken);
+        await db.Database.MigrateAsync(cancellationToken);
         await SeedTenantsAndAdminsAsync(cancellationToken);
-    }
-
-    private async Task EnsureSupportingTablesAsync(CancellationToken cancellationToken)
-    {
-        await db.Database.ExecuteSqlRawAsync(
-            @"CREATE TABLE IF NOT EXISTS tenant_edc_link_imports (
-                tenant_id INTEGER PRIMARY KEY,
-                filename TEXT NOT NULL,
-                source_hash TEXT NOT NULL,
-                csv_text TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                link_count INTEGER NOT NULL,
-                interval_count INTEGER NOT NULL,
-                date_from INTEGER NOT NULL,
-                date_to INTEGER NOT NULL,
-                imported_at INTEGER NOT NULL,
-                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-            );",
-            cancellationToken);
     }
 
     public async Task<User?> GetActiveUserByEmailAsync(string email, CancellationToken cancellationToken = default)
@@ -423,6 +396,7 @@ public sealed class AppService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        await BulkUpsertEdcIntervalsAsync(tenant.Id, parsed, cancellationToken);
 
         var updated = await db.TenantEdcImports.AsNoTracking().FirstAsync(x => x.TenantId == tenant.Id, cancellationToken);
         return new
@@ -431,6 +405,68 @@ public sealed class AppService(
             importInfo = SerializeEdcImport(updated),
             message = $"EDC data pro tenant {tenant.Name} byla ulozena na server.",
         };
+    }
+
+    private async Task BulkUpsertEdcIntervalsAsync(int tenantId, ParsedEdcPayload parsed, CancellationToken cancellationToken)
+    {
+        var conn = (NpgsqlConnection)db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(cancellationToken);
+
+        await using var createTmp = new NpgsqlCommand(
+            @"CREATE TEMP TABLE tmp_edc_readings (LIKE edc_readings INCLUDING DEFAULTS) ON COMMIT DROP;",
+            conn);
+        await createTmp.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var importer = await conn.BeginBinaryImportAsync(
+            "COPY tmp_edc_readings (time_from, time_to, tenant_id, ean, is_producer, kwh_total, kwh_remainder, kwh_missed) FROM STDIN (FORMAT BINARY)",
+            cancellationToken);
+
+        foreach (var interval in parsed.Intervals)
+        {
+            var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(interval.Start);
+            var tsTo   = DateTimeOffset.FromUnixTimeMilliseconds(interval.End);
+            for (var i = 0; i < parsed.Producers.Count; i++)
+            {
+                var p = interval.Producers[i];
+                await importer.StartRowAsync(cancellationToken);
+                await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
+                await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
+                await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
+                await importer.WriteAsync(parsed.Producers[i].Name, NpgsqlDbType.Text, cancellationToken);
+                await importer.WriteAsync(true, NpgsqlDbType.Boolean, cancellationToken);
+                await importer.WriteAsync(p.Before, NpgsqlDbType.Double, cancellationToken);
+                await importer.WriteAsync(p.After, NpgsqlDbType.Double, cancellationToken);
+                await importer.WriteAsync(p.Missed, NpgsqlDbType.Double, cancellationToken);
+            }
+            for (var i = 0; i < parsed.Consumers.Count; i++)
+            {
+                var c = interval.Consumers[i];
+                await importer.StartRowAsync(cancellationToken);
+                await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
+                await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
+                await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
+                await importer.WriteAsync(parsed.Consumers[i].Name, NpgsqlDbType.Text, cancellationToken);
+                await importer.WriteAsync(false, NpgsqlDbType.Boolean, cancellationToken);
+                await importer.WriteAsync(c.Before, NpgsqlDbType.Double, cancellationToken);
+                await importer.WriteAsync(c.After, NpgsqlDbType.Double, cancellationToken);
+                await importer.WriteAsync(c.Missed, NpgsqlDbType.Double, cancellationToken);
+            }
+        }
+
+        await importer.CompleteAsync(cancellationToken);
+
+        await using var upsertCmd = new NpgsqlCommand(
+            @"INSERT INTO edc_readings (time_from, time_to, tenant_id, ean, is_producer, kwh_total, kwh_remainder, kwh_missed)
+              SELECT time_from, time_to, tenant_id, ean, is_producer, kwh_total, kwh_remainder, kwh_missed FROM tmp_edc_readings
+              ON CONFLICT (tenant_id, ean, time_from) DO UPDATE SET
+                time_to       = EXCLUDED.time_to,
+                is_producer   = EXCLUDED.is_producer,
+                kwh_total     = EXCLUDED.kwh_total,
+                kwh_remainder = EXCLUDED.kwh_remainder,
+                kwh_missed    = EXCLUDED.kwh_missed;",
+            conn);
+        await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<object> SaveEdcLinkImportAsync(string csvText, string filename, AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default)
@@ -472,6 +508,7 @@ public sealed class AppService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        await BulkUpsertEdcLinkIntervalsAsync(tenant.Id, parsed, cancellationToken);
 
         var updated = await db.TenantEdcLinkImports.AsNoTracking().FirstAsync(x => x.TenantId == tenant.Id, cancellationToken);
         return new
@@ -482,26 +519,70 @@ public sealed class AppService(
         };
     }
 
-    public async Task<object> BuildMemberSharingDataAsync(int userId, int tenantId, CancellationToken cancellationToken = default)
+    private async Task BulkUpsertEdcLinkIntervalsAsync(int tenantId, ParsedEdcLinkPayload parsed, CancellationToken cancellationToken)
     {
-        var importRow = await db.TenantEdcImports.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
-        if (importRow is null || string.IsNullOrWhiteSpace(importRow.PayloadJson))
+        var conn = (NpgsqlConnection)db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(cancellationToken);
+
+        await using var createTmp = new NpgsqlCommand(
+            @"CREATE TEMP TABLE tmp_edc_link_readings (LIKE edc_link_readings INCLUDING DEFAULTS) ON COMMIT DROP;",
+            conn);
+        await createTmp.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var importer = await conn.BeginBinaryImportAsync(
+            "COPY tmp_edc_link_readings (time_from, time_to, tenant_id, producer_ean, consumer_ean, kwh_shared) FROM STDIN (FORMAT BINARY)",
+            cancellationToken);
+
+        foreach (var interval in parsed.Intervals)
         {
-            throw new InvalidOperationException("Pro tento tenant zatim nejsou ulozena EDC data.");
+            var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(interval.Start);
+            var tsTo   = DateTimeOffset.FromUnixTimeMilliseconds(interval.End);
+            foreach (var link in interval.Links)
+            {
+                if (link.Shared <= 0) continue;
+                await importer.StartRowAsync(cancellationToken);
+                await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
+                await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
+                await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
+                await importer.WriteAsync(link.ProducerEan, NpgsqlDbType.Text, cancellationToken);
+                await importer.WriteAsync(link.ConsumerEan, NpgsqlDbType.Text, cancellationToken);
+                await importer.WriteAsync(link.Shared, NpgsqlDbType.Double, cancellationToken);
+            }
         }
 
-        ParsedEdcPayload payload;
-        try
-        {
-            payload = JsonSerializer.Deserialize<ParsedEdcPayload>(importRow.PayloadJson, _jsonOptions)
-                ?? throw new InvalidOperationException();
-        }
-        catch
-        {
-            throw new InvalidOperationException("Ulozena EDC data se nepodarilo nacist.");
-        }
+        await importer.CompleteAsync(cancellationToken);
 
-        var exactIntervals = await GetExactAllocationIntervalsAsync(payload, tenantId, cancellationToken);
+        await using var upsertCmd = new NpgsqlCommand(
+            @"INSERT INTO edc_link_readings (time_from, time_to, tenant_id, producer_ean, consumer_ean, kwh_shared)
+              SELECT time_from, time_to, tenant_id, producer_ean, consumer_ean, kwh_shared FROM tmp_edc_link_readings
+              ON CONFLICT (tenant_id, producer_ean, consumer_ean, time_from) DO UPDATE SET
+                time_to    = EXCLUDED.time_to,
+                kwh_shared = EXCLUDED.kwh_shared;",
+            conn);
+        await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<object> BuildMemberSharingDataAsync(int userId, int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default)
+    {
+        var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(dateFrom);
+        var tsTo = DateTimeOffset.FromUnixTimeMilliseconds(dateTo);
+
+        var readings = await db.EdcReadings
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.TimeFrom >= tsFrom && x.TimeFrom < tsTo)
+            .OrderBy(x => x.TimeFrom).ThenBy(x => x.Ean)
+            .ToListAsync(cancellationToken);
+
+        if (readings.Count == 0)
+            throw new InvalidOperationException("Pro tento tenant nejsou v danem obdobi EDC data.");
+
+        var cs = StringComparer.Create(new CultureInfo("cs-CZ"), false);
+        var producerEans = readings.Where(x => x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+        var consumerEans = readings.Where(x => !x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+
+        if (producerEans.Count == 0 || consumerEans.Count == 0)
+            throw new InvalidOperationException("Pro tento tenant nejsou v danem obdobi EDC data.");
 
         var assignedRows = await db.UserEans
             .AsNoTracking()
@@ -515,9 +596,12 @@ public sealed class AppService(
             .ToHashSet(StringComparer.Ordinal);
 
         if (assignedSet.Count == 0)
-        {
             throw new InvalidOperationException("Uzivatel nema prirazene zadne EAN.");
-        }
+
+        var hasAssignedProducer = producerEans.Any(assignedSet.Contains);
+        var hasAssignedConsumer = consumerEans.Any(assignedSet.Contains);
+        if (!hasAssignedProducer && !hasAssignedConsumer)
+            throw new InvalidOperationException("Prirazene EAN uzivatele se v aktualnich EDC datech nevyskytuji.");
 
         var assignedMetaByEan = assignedRows
             .Select(x => new { Key = CsvUtils.NormalizeEan(x.Ean), Label = string.IsNullOrWhiteSpace(x.Label) ? x.MemberName : x.Label })
@@ -525,157 +609,125 @@ public sealed class AppService(
             .GroupBy(x => x.Key)
             .ToDictionary(x => x.Key!, x => x.First().Label ?? string.Empty, StringComparer.Ordinal);
 
-        var producerNames = payload.Producers.Select(x => CsvUtils.NormalizeEan(x.Name)).ToList();
-        var consumerNames = payload.Consumers.Select(x => CsvUtils.NormalizeEan(x.Name)).ToList();
-        var producerSet = producerNames.ToHashSet(StringComparer.Ordinal);
-        var consumerSet = consumerNames.ToHashSet(StringComparer.Ordinal);
-
-        var hasAssignedProducer = assignedSet.Any(producerSet.Contains);
-        var hasAssignedConsumer = assignedSet.Any(consumerSet.Contains);
-        if (!hasAssignedProducer && !hasAssignedConsumer)
-        {
-            throw new InvalidOperationException("Prirazene EAN uzivatele se v aktualnich EDC datech nevyskytuji.");
-        }
-
         var tenantEans = await db.TenantEans
             .AsNoTracking()
             .Where(x => x.TenantId == tenantId)
-            .Select(x => new { x.Ean, x.Label, x.MemberName, x.IsPublic })
+            .Select(x => new { x.Ean, x.Label, x.MemberName })
             .ToListAsync(cancellationToken);
 
         var metaByEan = tenantEans
-            .Select(x => new { Key = CsvUtils.NormalizeEan(x.Ean), Label = string.IsNullOrWhiteSpace(x.Label) ? x.MemberName : x.Label, IsPublic = x.IsPublic == 1 })
+            .Select(x => new { Key = CsvUtils.NormalizeEan(x.Ean), Label = string.IsNullOrWhiteSpace(x.Label) ? x.MemberName : x.Label })
             .Where(x => !string.IsNullOrWhiteSpace(x.Key))
             .GroupBy(x => x.Key)
-            .ToDictionary(x => x.Key!, x => x.First(), StringComparer.Ordinal);
+            .ToDictionary(x => x.Key!, x => x.First().Label ?? string.Empty, StringComparer.Ordinal);
 
-        var allSelectedRawEans = producerNames.Concat(consumerNames).Where(x => !string.IsNullOrWhiteSpace(x)).ToHashSet(StringComparer.Ordinal);
         var maskedValues = new HashSet<string>(StringComparer.Ordinal);
-        var displayByRawEan = new Dictionary<string, string>(StringComparer.Ordinal);
+        var displayByEan = new Dictionary<string, string>(StringComparer.Ordinal);
         var eanLabels = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (var rawEan in allSelectedRawEans)
+        foreach (var ean in producerEans.Concat(consumerEans))
         {
-            var canShowIdentity = assignedSet.Contains(rawEan);
-            if (canShowIdentity)
+            if (displayByEan.ContainsKey(ean)) continue;
+            if (assignedSet.Contains(ean))
             {
-                displayByRawEan[rawEan] = rawEan;
-                var label = assignedMetaByEan.TryGetValue(rawEan, out var fromAssigned) && !string.IsNullOrWhiteSpace(fromAssigned)
-                    ? fromAssigned
-                    : metaByEan.TryGetValue(rawEan, out var fromTenant) ? fromTenant.Label : string.Empty;
-
-                if (!string.IsNullOrWhiteSpace(label))
-                {
-                    eanLabels[rawEan] = label;
-                }
+                displayByEan[ean] = ean;
+                var label = assignedMetaByEan.TryGetValue(ean, out var l1) && !string.IsNullOrWhiteSpace(l1) ? l1
+                    : metaByEan.TryGetValue(ean, out var l2) ? l2 : string.Empty;
+                if (!string.IsNullOrWhiteSpace(label)) eanLabels[ean] = label;
             }
             else
             {
-                displayByRawEan[rawEan] = BuildMaskedEan(rawEan, maskedValues);
+                displayByEan[ean] = BuildMaskedEan(ean, maskedValues);
             }
         }
 
-        var producerIndexes = Enumerable.Range(0, payload.Producers.Count).ToList();
-        var consumerIndexes = Enumerable.Range(0, payload.Consumers.Count).ToList();
+        var producers = producerEans.Select((ean, idx) => new { name = displayByEan[ean], csvIndex = idx }).ToList();
+        var consumers = consumerEans.Select((ean, idx) => new { name = displayByEan[ean], csvIndex = idx }).ToList();
 
-        var producers = producerIndexes
-            .Select((originalIndex, idx) => new
-            {
-                name = displayByRawEan.GetValueOrDefault(CsvUtils.NormalizeEan(payload.Producers[originalIndex].Name))
-                    ?? BuildMaskedEan(CsvUtils.NormalizeEan(payload.Producers[originalIndex].Name), maskedValues),
-                csvIndex = idx,
-            })
-            .ToList();
+        var producerIndexByEan = producerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
+        var consumerIndexByEan = consumerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
 
-        var consumers = consumerIndexes
-            .Select((originalIndex, idx) => new
-            {
-                name = displayByRawEan.GetValueOrDefault(CsvUtils.NormalizeEan(payload.Consumers[originalIndex].Name))
-                    ?? BuildMaskedEan(CsvUtils.NormalizeEan(payload.Consumers[originalIndex].Name), maskedValues),
-                csvIndex = idx,
-            })
-            .ToList();
+        var linkReadings = await db.EdcLinkReadings
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.TimeFrom >= tsFrom && x.TimeFrom < tsTo)
+            .ToListAsync(cancellationToken);
 
-        var intervals = payload.Intervals.Select((interval, intervalIndex) =>
-        {
-            var nextProducers = producerIndexes.Select(originalIndex =>
+        var linksByTime = linkReadings.GroupBy(x => x.TimeFrom).ToDictionary(x => x.Key, x => x.ToList());
+        var hasExactAllocations = linkReadings.Count > 0;
+
+        var intervals = readings
+            .GroupBy(x => x.TimeFrom)
+            .OrderBy(g => g.Key)
+            .Select(g =>
             {
-                var source = originalIndex < interval.Producers.Count ? interval.Producers[originalIndex] : new EdcIntervalProducer(0, 0, 0);
+                var producerData = producerEans.Select(ean =>
+                {
+                    var r = g.FirstOrDefault(x => x.Ean == ean && x.IsProducer);
+                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
+                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                }).ToList();
+
+                var consumerData = consumerEans.Select(ean =>
+                {
+                    var r = g.FirstOrDefault(x => x.Ean == ean && !x.IsProducer);
+                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
+                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                }).ToList();
+
+                var sumProdBefore = producerData.Sum(x => x.before);
+                var sumProdAfter  = producerData.Sum(x => x.after);
+                var sumConsBefore = consumerData.Sum(x => x.before);
+                var sumConsAfter  = consumerData.Sum(x => x.after);
+                var sumProduction = sumProdBefore;
+                var sumSharing = Math.Min(Math.Max(0, sumProdBefore - sumProdAfter), Math.Max(0, sumConsBefore - sumConsAfter));
+                var sumMissed = sumProdAfter > 0.01 && sumConsAfter > 0.01 ? Math.Min(sumProdAfter, sumConsAfter) : 0d;
+
+                List<List<double>>? exactAllocations = null;
+                if (linksByTime.TryGetValue(g.Key, out var links))
+                {
+                    var matrix = producerEans.Select(_ => consumerEans.Select(_ => 0d).ToList()).ToList();
+                    var anyLink = false;
+                    foreach (var lnk in links)
+                    {
+                        if (producerIndexByEan.TryGetValue(lnk.ProducerEan, out var pi)
+                            && consumerIndexByEan.TryGetValue(lnk.ConsumerEan, out var ci))
+                        {
+                            matrix[pi][ci] += Math.Max(0, lnk.KwhShared);
+                            anyLink = true;
+                        }
+                    }
+                    if (anyLink) exactAllocations = matrix;
+                }
+
                 return new
                 {
-                    before = source.Before,
-                    after = source.After,
-                    missed = source.Missed,
+                    start = g.Key.ToUnixTimeMilliseconds(),
+                    producers = producerData,
+                    consumers = consumerData,
+                    exactAllocations,
+                    sumProduction,
+                    sumSharing,
+                    sumMissed,
                 };
             }).ToList();
 
-            var exactAllocation = exactIntervals is not null && intervalIndex < exactIntervals.Count
-                ? exactIntervals[intervalIndex]
-                : null;
-            var nextExactAllocations = exactAllocation is not null
-                ? producerIndexes.Select(producerIndex =>
-                    consumerIndexes.Select(consumerIndex => exactAllocation[producerIndex][consumerIndex]).ToList()
-                ).ToList()
-                : null;
+        var importRow = await db.TenantEdcImports.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        var filename = importRow?.Filename ?? "edc.csv";
 
-            var nextConsumers = consumerIndexes.Select(originalIndex =>
-            {
-                var source = originalIndex < interval.Consumers.Count ? interval.Consumers[originalIndex] : new EdcIntervalConsumer(0, 0, 0);
-                return new
-                {
-                    before = source.Before,
-                    after = source.After,
-                    missed = source.Missed,
-                };
-            }).ToList();
-
-            var sumProduction = nextProducers.Sum(x => x.before);
-            var sumSharing = Math.Min(
-                Math.Max(0, sumProduction - nextProducers.Sum(x => x.after)),
-                Math.Max(0, nextConsumers.Sum(x => x.before) - nextConsumers.Sum(x => x.after))
-            );
-            var sumMissed = Math.Min(
-                Math.Max(0, nextProducers.Sum(x => x.after)),
-                Math.Max(0, nextConsumers.Sum(x => x.after))
-            );
-
-            return new
-            {
-                start = interval.Start,
-                producers = nextProducers,
-                consumers = nextConsumers,
-                exactAllocations = nextExactAllocations,
-                sumProduction,
-                sumSharing,
-                sumMissed,
-            };
-        }).ToList();
-
-        var ownProducerNames = payload.Producers
-            .Select(x => CsvUtils.NormalizeEan(x.Name))
-            .Where(assignedSet.Contains)
-            .Select(x => displayByRawEan.GetValueOrDefault(x) ?? x)
-            .Distinct()
-            .ToList();
-
-        var ownConsumerNames = payload.Consumers
-            .Select(x => CsvUtils.NormalizeEan(x.Name))
-            .Where(assignedSet.Contains)
-            .Select(x => displayByRawEan.GetValueOrDefault(x) ?? x)
-            .Distinct()
-            .ToList();
+        var ownProducerNames = producerEans.Where(assignedSet.Contains).Select(e => displayByEan[e]).ToList();
+        var ownConsumerNames = consumerEans.Where(assignedSet.Contains).Select(e => displayByEan[e]).ToList();
 
         return new
         {
             data = new
             {
-                filename = string.IsNullOrWhiteSpace(payload.Filename) ? importRow.Filename : payload.Filename,
+                filename,
                 producers,
                 consumers,
                 intervals,
-                hasExactAllocations = exactIntervals is not null,
-                dateFrom = payload.DateFrom > 0 ? payload.DateFrom : (intervals.Count > 0 ? intervals[0].start : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                dateTo = payload.DateTo > 0 ? payload.DateTo : (intervals.Count > 0 ? intervals[^1].start : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                hasExactAllocations,
+                dateFrom,
+                dateTo,
             },
             eanLabels,
             memberScope = new
@@ -686,33 +738,26 @@ public sealed class AppService(
         };
     }
 
-    public async Task<object> BuildTenantFullSharingDataAsync(int tenantId, CancellationToken cancellationToken = default)
+    public async Task<object> BuildTenantFullSharingDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default)
     {
-        var importRow = await db.TenantEdcImports.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
-        if (importRow is null || string.IsNullOrWhiteSpace(importRow.PayloadJson))
-        {
-            throw new InvalidOperationException("Pro tuto skupinu sdileni zatim nejsou ulozena EDC data.");
-        }
+        var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(dateFrom);
+        var tsTo = DateTimeOffset.FromUnixTimeMilliseconds(dateTo);
 
-        ParsedEdcPayload payload;
-        try
-        {
-            payload = JsonSerializer.Deserialize<ParsedEdcPayload>(importRow.PayloadJson, _jsonOptions)
-                ?? throw new InvalidOperationException();
-        }
-        catch
-        {
-            throw new InvalidOperationException("Ulozena EDC data se nepodarilo nacist.");
-        }
-
-        var exactIntervals = await GetExactAllocationIntervalsAsync(payload, tenantId, cancellationToken);
-
-        var tenantEans = await db.TenantEans
+        var readings = await db.EdcReadings
             .AsNoTracking()
-            .Where(x => x.TenantId == tenantId)
-            .Select(x => new { x.Ean, x.Label, x.MemberName })
+            .Where(x => x.TenantId == tenantId && x.TimeFrom >= tsFrom && x.TimeFrom < tsTo)
+            .OrderBy(x => x.TimeFrom).ThenBy(x => x.Ean)
             .ToListAsync(cancellationToken);
 
+        if (readings.Count == 0)
+            throw new InvalidOperationException("Pro tuto skupinu sdileni nejsou v danem obdobi EDC data.");
+
+        var cs = StringComparer.Create(new CultureInfo("cs-CZ"), false);
+        var producerEans = readings.Where(x => x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+        var consumerEans = readings.Where(x => !x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+
+        var tenantEans = await db.TenantEans
+            .AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
         var userEans = await db.UserEans
             .AsNoTracking()
             .Join(db.Users.AsNoTracking(), ue => ue.UserId, u => u.Id, (ue, u) => new { ue.Ean, ue.Label, ue.MemberName, u.TenantId })
@@ -723,56 +768,102 @@ public sealed class AppService(
         foreach (var row in tenantEans)
         {
             var key = CsvUtils.NormalizeEan(row.Ean);
-            if (string.IsNullOrWhiteSpace(key))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(key)) continue;
             var label = string.IsNullOrWhiteSpace(row.Label) ? row.MemberName : row.Label;
-            if (!string.IsNullOrWhiteSpace(label))
-            {
-                eanLabels[key] = label;
-            }
+            if (!string.IsNullOrWhiteSpace(label)) eanLabels[key] = label;
         }
-
         foreach (var row in userEans)
         {
             var key = CsvUtils.NormalizeEan(row.Ean);
-            if (string.IsNullOrWhiteSpace(key) || eanLabels.ContainsKey(key))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(key) || eanLabels.ContainsKey(key)) continue;
             var label = string.IsNullOrWhiteSpace(row.Label) ? row.MemberName : row.Label;
-            if (!string.IsNullOrWhiteSpace(label))
-            {
-                eanLabels[key] = label;
-            }
+            if (!string.IsNullOrWhiteSpace(label)) eanLabels[key] = label;
         }
 
-        var producers = payload.Producers.Select((x, index) => new { name = CsvUtils.NormalizeEan(x.Name), csvIndex = index }).ToList();
-        var consumers = payload.Consumers.Select((x, index) => new { name = CsvUtils.NormalizeEan(x.Name), csvIndex = index }).ToList();
+        var producers = producerEans.Select((ean, idx) => new { name = ean, csvIndex = idx }).ToList();
+        var consumers = consumerEans.Select((ean, idx) => new { name = ean, csvIndex = idx }).ToList();
 
-        var intervals = payload.Intervals.Select((interval, intervalIndex) => new
-        {
-            start = interval.Start,
-            producers = interval.Producers.Select(item => new { before = item.Before, after = item.After, missed = item.Missed }).ToList(),
-            consumers = interval.Consumers.Select(item => new { before = item.Before, after = item.After, missed = item.Missed }).ToList(),
-            exactAllocations = exactIntervals is not null && intervalIndex < exactIntervals.Count ? exactIntervals[intervalIndex] : null,
-            sumProduction = interval.SumProduction,
-            sumSharing = interval.SumSharing,
-            sumMissed = interval.SumMissed,
-        }).ToList();
+        var producerIndexByEan = producerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
+        var consumerIndexByEan = consumerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
+
+        var linkReadings = await db.EdcLinkReadings
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.TimeFrom >= tsFrom && x.TimeFrom < tsTo)
+            .ToListAsync(cancellationToken);
+
+        var linksByTime = linkReadings.GroupBy(x => x.TimeFrom).ToDictionary(x => x.Key, x => x.ToList());
+        var hasExactAllocations = linkReadings.Count > 0;
+
+        var intervals = readings
+            .GroupBy(x => x.TimeFrom)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var producerData = producerEans.Select(ean =>
+                {
+                    var r = g.FirstOrDefault(x => x.Ean == ean && x.IsProducer);
+                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
+                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                }).ToList();
+
+                var consumerData = consumerEans.Select(ean =>
+                {
+                    var r = g.FirstOrDefault(x => x.Ean == ean && !x.IsProducer);
+                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
+                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                }).ToList();
+
+                var sumProdBefore = producerData.Sum(x => x.before);
+                var sumProdAfter  = producerData.Sum(x => x.after);
+                var sumConsBefore = consumerData.Sum(x => x.before);
+                var sumConsAfter  = consumerData.Sum(x => x.after);
+                var sumProduction = sumProdBefore;
+                var sumSharing = Math.Min(Math.Max(0, sumProdBefore - sumProdAfter), Math.Max(0, sumConsBefore - sumConsAfter));
+                var sumMissed = sumProdAfter > 0.01 && sumConsAfter > 0.01 ? Math.Min(sumProdAfter, sumConsAfter) : 0d;
+
+                List<List<double>>? exactAllocations = null;
+                if (linksByTime.TryGetValue(g.Key, out var links))
+                {
+                    var matrix = producerEans.Select(_ => consumerEans.Select(_ => 0d).ToList()).ToList();
+                    var anyLink = false;
+                    foreach (var lnk in links)
+                    {
+                        if (producerIndexByEan.TryGetValue(lnk.ProducerEan, out var pi)
+                            && consumerIndexByEan.TryGetValue(lnk.ConsumerEan, out var ci))
+                        {
+                            matrix[pi][ci] += Math.Max(0, lnk.KwhShared);
+                            anyLink = true;
+                        }
+                    }
+                    if (anyLink) exactAllocations = matrix;
+                }
+
+                return new
+                {
+                    start = g.Key.ToUnixTimeMilliseconds(),
+                    producers = producerData,
+                    consumers = consumerData,
+                    exactAllocations,
+                    sumProduction,
+                    sumSharing,
+                    sumMissed,
+                };
+            }).ToList();
+
+        var importRow = await db.TenantEdcImports.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        var filename = importRow?.Filename ?? "edc.csv";
 
         return new
         {
             data = new
             {
-                filename = string.IsNullOrWhiteSpace(importRow.Filename) ? (string.IsNullOrWhiteSpace(payload.Filename) ? "server-edc.csv" : payload.Filename) : importRow.Filename,
+                filename,
                 producers,
                 consumers,
                 intervals,
-                hasExactAllocations = exactIntervals is not null,
-                dateFrom = payload.DateFrom > 0 ? payload.DateFrom : (intervals.Count > 0 ? intervals[0].start : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                dateTo = payload.DateTo > 0 ? payload.DateTo : (intervals.Count > 0 ? intervals[^1].start : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                hasExactAllocations,
+                dateFrom,
+                dateTo,
             },
             eanLabels,
             memberScope = (object?)null,
@@ -1330,72 +1421,6 @@ public sealed class AppService(
             dateTo = row.DateTo,
             importedAt = row.ImportedAt,
         };
-    }
-
-    private async Task<List<List<List<double>>>?> GetExactAllocationIntervalsAsync(ParsedEdcPayload payload, int tenantId, CancellationToken cancellationToken)
-    {
-        var linkImport = await db.TenantEdcLinkImports.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
-        if (linkImport is null || string.IsNullOrWhiteSpace(linkImport.PayloadJson))
-        {
-            return null;
-        }
-
-        ParsedEdcLinkPayload linkPayload;
-        try
-        {
-            linkPayload = JsonSerializer.Deserialize<ParsedEdcLinkPayload>(linkImport.PayloadJson, _jsonOptions)
-                ?? throw new InvalidOperationException();
-        }
-        catch
-        {
-            return null;
-        }
-
-        var producerIndexByEan = payload.Producers
-            .Select((producer, index) => new { Key = CsvUtils.NormalizeEan(producer.Name), Index = index })
-            .Where(x => !string.IsNullOrWhiteSpace(x.Key))
-            .ToDictionary(x => x.Key!, x => x.Index, StringComparer.Ordinal);
-
-        var consumerIndexByEan = payload.Consumers
-            .Select((consumer, index) => new { Key = CsvUtils.NormalizeEan(consumer.Name), Index = index })
-            .Where(x => !string.IsNullOrWhiteSpace(x.Key))
-            .ToDictionary(x => x.Key!, x => x.Index, StringComparer.Ordinal);
-
-        var linkIntervalsByStart = linkPayload.Intervals.ToDictionary(x => x.Start, x => x);
-        var result = new List<List<List<double>>>();
-        var hasExactAllocations = false;
-
-        foreach (var interval in payload.Intervals)
-        {
-            var matrix = Enumerable.Range(0, payload.Producers.Count)
-                .Select(_ => Enumerable.Repeat(0d, payload.Consumers.Count).ToList())
-                .ToList();
-
-            if (linkIntervalsByStart.TryGetValue(interval.Start, out var linkInterval))
-            {
-                foreach (var link in linkInterval.Links)
-                {
-                    if (!producerIndexByEan.TryGetValue(CsvUtils.NormalizeEan(link.ProducerEan), out var producerIndex)
-                        || !consumerIndexByEan.TryGetValue(CsvUtils.NormalizeEan(link.ConsumerEan), out var consumerIndex))
-                    {
-                        continue;
-                    }
-
-                    var shared = Math.Max(0, link.Shared);
-                    if (shared <= 0)
-                    {
-                        continue;
-                    }
-
-                    matrix[producerIndex][consumerIndex] += shared;
-                    hasExactAllocations = true;
-                }
-            }
-
-            result.Add(matrix);
-        }
-
-        return hasExactAllocations ? result : null;
     }
 
     private async Task<Tenant> ResolveTenantEntityAsync(AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken)

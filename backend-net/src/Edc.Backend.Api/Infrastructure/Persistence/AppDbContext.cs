@@ -13,6 +13,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TenantEan> TenantEans => Set<TenantEan>();
     public DbSet<TenantEdcImport> TenantEdcImports => Set<TenantEdcImport>();
     public DbSet<TenantEdcLinkImport> TenantEdcLinkImports => Set<TenantEdcLinkImport>();
+    public DbSet<EdcReading> EdcReadings => Set<EdcReading>();
+    public DbSet<EdcLinkReading> EdcLinkReadings => Set<EdcLinkReading>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -101,5 +103,25 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         modelBuilder.Entity<TenantEdcLinkImport>().Property(x => x.DateFrom).HasColumnName("date_from");
         modelBuilder.Entity<TenantEdcLinkImport>().Property(x => x.DateTo).HasColumnName("date_to");
         modelBuilder.Entity<TenantEdcLinkImport>().Property(x => x.ImportedAt).HasColumnName("imported_at");
+
+        modelBuilder.Entity<EdcReading>().ToTable("edc_readings");
+        modelBuilder.Entity<EdcReading>().HasKey(x => new { x.TenantId, x.Ean, x.TimeFrom });
+        modelBuilder.Entity<EdcReading>().Property(x => x.TimeFrom).HasColumnName("time_from");
+        modelBuilder.Entity<EdcReading>().Property(x => x.TimeTo).HasColumnName("time_to");
+        modelBuilder.Entity<EdcReading>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<EdcReading>().Property(x => x.Ean).HasColumnName("ean");
+        modelBuilder.Entity<EdcReading>().Property(x => x.IsProducer).HasColumnName("is_producer");
+        modelBuilder.Entity<EdcReading>().Property(x => x.KwhTotal).HasColumnName("kwh_total");
+        modelBuilder.Entity<EdcReading>().Property(x => x.KwhRemainder).HasColumnName("kwh_remainder");
+        modelBuilder.Entity<EdcReading>().Property(x => x.KwhMissed).HasColumnName("kwh_missed");
+
+        modelBuilder.Entity<EdcLinkReading>().ToTable("edc_link_readings");
+        modelBuilder.Entity<EdcLinkReading>().HasKey(x => new { x.TenantId, x.ProducerEan, x.ConsumerEan, x.TimeFrom });
+        modelBuilder.Entity<EdcLinkReading>().Property(x => x.TimeFrom).HasColumnName("time_from");
+        modelBuilder.Entity<EdcLinkReading>().Property(x => x.TimeTo).HasColumnName("time_to");
+        modelBuilder.Entity<EdcLinkReading>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<EdcLinkReading>().Property(x => x.ProducerEan).HasColumnName("producer_ean");
+        modelBuilder.Entity<EdcLinkReading>().Property(x => x.ConsumerEan).HasColumnName("consumer_ean");
+        modelBuilder.Entity<EdcLinkReading>().Property(x => x.KwhShared).HasColumnName("kwh_shared");
     }
 }

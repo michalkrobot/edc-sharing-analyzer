@@ -239,8 +239,10 @@ public sealed class CsvParser : ICsvParser
                 }
             }
 
+            var end = ParseEdcDate(parts, timeIndex: 2);
             intervals.Add(new EdcInterval(
                 start,
+                end,
                 intervalProducers,
                 intervalConsumers,
                 sumProductionBefore,
@@ -327,6 +329,7 @@ public sealed class CsvParser : ICsvParser
             }
 
             var start = ParseEdcDate(parts);
+            var end = ParseEdcDate(parts, timeIndex: 2);
             var links = new List<EdcLinkValue>();
             foreach (var column in columns)
             {
@@ -339,7 +342,7 @@ public sealed class CsvParser : ICsvParser
                 links.Add(new EdcLinkValue(column.ProducerEan, column.ConsumerEan, shared));
             }
 
-            intervals.Add(new EdcLinkInterval(start, links));
+            intervals.Add(new EdcLinkInterval(start, end, links));
         }
 
         if (intervals.Count == 0)
@@ -359,10 +362,10 @@ public sealed class CsvParser : ICsvParser
         );
     }
 
-    private static long ParseEdcDate(string[] parts)
+    private static long ParseEdcDate(string[] parts, int timeIndex = 1)
     {
         var dateRaw = parts.ElementAtOrDefault(0) ?? string.Empty;
-        var timeRaw = parts.ElementAtOrDefault(1) ?? string.Empty;
+        var timeRaw = parts.ElementAtOrDefault(timeIndex) ?? string.Empty;
         var dateParts = dateRaw.Split('.');
         var timeParts = timeRaw.Split(':');
 

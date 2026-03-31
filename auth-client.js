@@ -70,7 +70,7 @@
   }
 
   function isSharingViewPage() {
-    return Boolean(document.body && document.body.dataset.page === "sharing");
+    return Boolean(document.body && ["sharing", "simulation"].includes(document.body.dataset.page));
   }
 
   function buildSharedNavigation() {

@@ -1029,6 +1029,20 @@ h3 {
   gap: 0.8rem;
 }
 
+.history-weights-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.45rem;
+}
+
+#historicalWeightsStatus {
+  margin-top: 0.2rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
 label {
   display: grid;
   gap: 0.32rem;

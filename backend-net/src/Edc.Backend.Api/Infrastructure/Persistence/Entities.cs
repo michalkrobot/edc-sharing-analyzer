@@ -94,3 +94,32 @@ public sealed class TenantEdcLinkImport
     public long DateTo { get; set; }
     public long ImportedAt { get; set; }
 }
+
+// Jedno mereni na EAN za casovy interval (z EDC souboru)
+// time_from/time_to = explicitne z CSV (Cas od / Cas do)
+// kwh_total     = IN sloupec (abs. hodnota) – celkova vyroba/spotreba pred sdilenim
+// kwh_remainder = OUT sloupec (abs. hodnota) – zbytek po sdileni
+// kwh_shared    = kwh_total - kwh_remainder (odvoditelne)
+// kwh_missed    = promeskana prilezitost ke sdileni
+public sealed class EdcReading
+{
+    public DateTimeOffset TimeFrom { get; set; }
+    public DateTimeOffset TimeTo { get; set; }
+    public int TenantId { get; set; }
+    public string Ean { get; set; } = string.Empty;
+    public bool IsProducer { get; set; }
+    public double KwhTotal { get; set; }
+    public double KwhRemainder { get; set; }
+    public double KwhMissed { get; set; }
+}
+
+// Skutecne sdileni mezi konkretnim vyrobcem a odberatelem za casovy interval (ze Sipka souboru)
+public sealed class EdcLinkReading
+{
+    public DateTimeOffset TimeFrom { get; set; }
+    public DateTimeOffset TimeTo { get; set; }
+    public int TenantId { get; set; }
+    public string ProducerEan { get; set; } = string.Empty;
+    public string ConsumerEan { get; set; } = string.Empty;
+    public double KwhShared { get; set; }
+}
