@@ -203,11 +203,9 @@ namespace Edc.Backend.Api.Migrations
             migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;");
 
             migrationBuilder.Sql("SELECT create_hypertable('edc_readings', by_range('time_from', INTERVAL '1 month'));");
-            migrationBuilder.Sql("SELECT add_retention_policy('edc_readings', INTERVAL '3 years');");
             migrationBuilder.Sql("CREATE INDEX idx_er_tenant_ean_time ON edc_readings (tenant_id, ean, time_from DESC);");
 
             migrationBuilder.Sql("SELECT create_hypertable('edc_link_readings', by_range('time_from', INTERVAL '1 month'));");
-            migrationBuilder.Sql("SELECT add_retention_policy('edc_link_readings', INTERVAL '3 years');");
             migrationBuilder.Sql("CREATE INDEX idx_elr_tenant_time ON edc_link_readings (tenant_id, time_from DESC);");
         }
 
