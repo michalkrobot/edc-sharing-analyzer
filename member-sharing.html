@@ -1,9 +1,9 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="cs">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EDC Multi-EAN Analyzer - Zobrazení sdílení</title>
+    <title>EDC Multi-EAN Analyzer - Přehled člena</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -16,7 +16,7 @@
     />
     <link rel="stylesheet" href="multi-ean-analyzer.css" />
   </head>
-  <body data-page="sharing">
+  <body data-page="member-sharing">
     <div class="bg-shape bg-shape-a"></div>
     <div class="bg-shape bg-shape-b"></div>
 
@@ -31,72 +31,27 @@
       </header>
 
       <header class="hero">
-        <h1>Zobrazení sdílení pro více výrobních EAN</h1>
+        <h1>Členský přehled sdílení</h1>
         <p class="hero-text">
-          Nahráj CSV report a hned uvidíš skutečné sdílení z dat. Tato stránka nepoužívá simulaci ani optimalizaci.
+          Data se načítají automaticky z databáze podle tvého účtu.
         </p>
         <div id="pageNavMount"></div>
-        <section class="sharing-hero-strip" aria-label="Hlavní přínosy přehledu sdílení">
-          <article class="sharing-hero-strip-card">
-            <span class="sharing-hero-strip-label">Rychlý audit</span>
-            <strong>Skutečné sdílení bez výpočtu scénářů</strong>
-            <p>Jedno nahrání CSV a okamžitě vidíš souhrn i rozpad mezi výrobními a odběrnými EAN.</p>
-          </article>
-          <article class="sharing-hero-strip-card">
-            <span class="sharing-hero-strip-label">Co uvidíš</span>
-            <div class="sharing-hero-tags">
-              <span>souhrn výrobních EAN</span>
-              <span>souhrn odběrných EAN</span>
-              <span>rozpad po rozkliknutí řádku</span>
-              <span>koláčové a časové grafy</span>
-            </div>
-          </article>
-        </section>
       </header>
-
-      <section class="card" id="sharingGroupFilterSection" hidden>
+      
+      <section class="card member-filter-card" id="memberFilterSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Výběr člena</h2>
+          <span class="sharing-section-chip">Admin filtr</span>
+        </div>
+        <p class="section-description">Vyberte člena tenanta, pro kterého chcete zobrazit data sdílení.</p>
         <div class="member-filter-toolbar">
-          <label class="member-filter-label" for="sharingGroupSelect">Skupina sdílení:</label>
-          <select id="sharingGroupSelect" class="member-filter-select">
-            <option value="">-- Vyberte skupinu sdílení --</option>
+          <label for="memberSelect" class="member-filter-label">Člen:</label>
+          <select id="memberSelect" class="member-filter-select">
+            <option value="">-- Vyberte člena --</option>
           </select>
         </div>
       </section>
-
-      <section class="card" id="embedSettingsSection" hidden>
-        <div class="sharing-section-head">
-          <h2>Nastavení vložení</h2>
-          <span class="sharing-section-chip">Embed</span>
-        </div>
-        <p class="section-description">Zkopíruj kód a vlož ho na cílovou stránku.</p>
-        <p class="section-description">
-          Postup vložení: 1) ponech v URL parametr tenantId, 2) zkopíruj níže uvedený iframe,
-          3) vlož jej do HTML cílové stránky na místo, kde chceš zobrazit report,
-          4) publikuj změny na cílovém webu.
-        </p>
-        <label class="time-range-field" for="embedCodeOutput">
-          Kód pro vložení
-          <textarea id="embedCodeOutput" rows="5" readonly></textarea>
-        </label>
-      </section>
-
-      <section class="card controls">
-        <div id="fileUploadControls">
-          <div class="control-grid">
-            <label>
-              CSV report
-              <input id="uploadCsv" type="file" accept=".csv,text/csv" />
-            </label>
-            <label>
-              EAN názvy (vlastní databáze)
-              <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
-            </label>
-          </div>
-        </div>
-        <p id="status" class="status">Čekám na nahrání CSV...</p>
-        <p id="eanLabelsStatus" class="status" style="font-size: 0.85rem; color: #5f6d5c; margin-top: 0.3rem;">EAN databáze: připraveno</p>
-      </section>
-
+      
       <section class="card time-range-card" id="timeFilterSection" hidden>
         <div class="sharing-section-head">
           <h2>Časový filtr dat</h2>
@@ -138,10 +93,6 @@
           <button id="timeFilterResetBtn" type="button" class="btn btn-ghost">Celé období</button>
         </div>
         <div class="time-thermometer" aria-label="Teplomer casoveho filtru">
-          <div class="time-thermometer-head">
-            <strong>Teplomer intervalu</strong>
-            <span>Posuvniky upravis zacatek a konec obdobi.</span>
-          </div>
           <div class="time-thermometer-track-wrap">
             <div id="timeThermometerFill" class="time-thermometer-fill" aria-hidden="true"></div>
             <input id="timeThermometerFrom" type="range" min="0" max="0" value="0" step="1" aria-label="Zacatek intervalu" />
@@ -155,23 +106,9 @@
         <p id="timeFilterInfo" class="summary-filter-status">Filtr není aktivní.</p>
       </section>
 
-      <section class="card" id="metaSection" hidden>
-        <h2>Informace o souboru</h2>
-        <table class="meta-table">
-          <tbody>
-            <tr><th>Soubor</th><td id="metaFilename"></td></tr>
-            <tr><th>Interval od</th><td id="metaFrom"></td></tr>
-            <tr><th>Interval do</th><td id="metaTo"></td></tr>
-            <tr><th>Počet intervalů</th><td id="metaIntervals"></td></tr>
-            <tr><th>Výrobní EAN</th><td id="metaProducers"></td></tr>
-            <tr><th>Odběrné EAN</th><td id="metaConsumers"></td></tr>
-          </tbody>
-        </table>
-      </section>
-
       <section class="card summary-stacked" id="summarySection" hidden>
         <div class="sharing-section-head">
-          <h2>Souhrn nahraných dat</h2>
+          <h2>Souhrn dat</h2>
           <span class="sharing-section-chip">Interaktivní tabulky</span>
         </div>
         <div class="summary-grid">
@@ -227,8 +164,8 @@
 
       <section class="card" id="producerPieChartsSection" hidden>
         <div class="sharing-section-head">
-          <h2>Rozpad výrob po výrobně</h2>
-          <span class="sharing-section-chip">Koláčové grafy</span>
+          <h2>Výrobny - Využití výroby</h2>
+          <span class="sharing-section-chip">Rozpad výroby</span>
         </div>
         <p class="section-description">Koláčové grafy pro každou výrobnu ukazují rozpad její výroby na sdílení, ušlou příležitost a zůstatek.</p>
         <div id="producerPieCharts" class="pie-charts-grid"></div>
@@ -236,8 +173,8 @@
 
       <section class="card" id="producerConsumerPieChartsSection" hidden>
         <div class="sharing-section-head">
-          <h2>Rozpad sdílení po odběrných místech</h2>
-          <span class="sharing-section-chip">Distribuce sdílení</span>
+          <h2>Výrobny - Rozpad sdílení po odběrných místech</h2>
+          <span class="sharing-section-chip">Tok sdílení</span>
         </div>
         <p class="section-description">Koláčové grafy pro každou výrobnu ukazují rozdělení sdílení mezi jednotlivá odběrná místa.</p>
         <div id="producerConsumerPieCharts" class="pie-charts-grid"></div>
@@ -245,20 +182,56 @@
 
       <section class="card" id="bestDaySection" hidden>
         <div class="sharing-section-head">
-          <h2 id="bestDayTitle">Nejlepší den</h2>
+          <h2 id="bestDayTitle">Výrobny - Nejlepší den</h2>
           <span class="sharing-section-chip">Denní maximum</span>
         </div>
-        <p class="section-description">Den s nejvyšším celkovým sdílením.</p>
+        <p class="section-description">Den s nejvyšší výrobou a sdílením pro tvoje výrobny.</p>
         <div id="bestDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 
       <section class="card" id="averageDaySection" hidden>
         <div class="sharing-section-head">
-          <h2>Průměrný den</h2>
+          <h2>Výrobny - Průměrný den</h2>
           <span class="sharing-section-chip">Typický průběh</span>
         </div>
-        <p class="section-description">Průměr přes všechny dny v souboru - výroba, spotřeba a sdílení po 15minutových intervalech.</p>
+        <p class="section-description">Průměr přes všechny dny v souboru – výroba a sdílení po 15minutových intervalech.</p>
         <div id="averageDayChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="consumerDailyTotalsSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Odběry - Denní souhrn</h2>
+          <span class="sharing-section-chip">Denní sumy</span>
+        </div>
+        <p class="section-description">Sloupcový přehled denních součtů spotřeby a sdílení.</p>
+        <div id="consumerDailyTotalsChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="consumerProducerPieChartsSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Odběry - Rozpad sdílení po výrobnách</h2>
+          <span class="sharing-section-chip">Tok sdílení</span>
+        </div>
+        <p class="section-description">Koláčové grafy pro každé odběrné místo ukazují rozdělení přijatého sdílení mezi jednotlivé výrobny.</p>
+        <div id="consumerProducerPieCharts" class="pie-charts-grid"></div>
+      </section>
+
+      <section class="card" id="consumerBestDaySection" hidden>
+        <div class="sharing-section-head">
+          <h2 id="consumerBestDayTitle">Odběry - Nejlepší den</h2>
+          <span class="sharing-section-chip">Denní maximum</span>
+        </div>
+        <p class="section-description">Den s nejvyšší dodávkou ze sdílení pro tvoje odběrná místa.</p>
+        <div id="consumerBestDayChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="consumerAverageDaySection" hidden>
+        <div class="sharing-section-head">
+          <h2>Odběry - Průměrný den</h2>
+          <span class="sharing-section-chip">Typický průběh</span>
+        </div>
+        <p class="section-description">Průměr přes všechny dny v souboru – spotřeba a sdílení po 15minutových intervalech.</p>
+        <div id="consumerAverageDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 
       <footer class="enerkom-site-footer card">
@@ -274,5 +247,3 @@
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
 </html>
-
-

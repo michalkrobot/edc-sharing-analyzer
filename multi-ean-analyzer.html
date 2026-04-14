@@ -33,36 +33,46 @@
       <header class="hero">
         <h1>Simulace sdílení pro více výrobních EAN</h1>
         <p class="hero-text">
-          Nahráj CSV report, nastav alokace odběratelů a simuluj sdílení i optimální váhy napříč více výrobnými zdroji.
+          Načti vybranou skupinu sdílení nebo vlastní CSV, nech si doporučit metodické alokace z historie a simuluj sdílení s prioritou na co nejvyšší nasdílení výroby.
         </p>
-        <nav class="page-nav">
-          <a href="multi-ean-sharing.html" class="nav-link">Zobrazení sdílení</a>
-          <a href="multi-ean-analyzer.html" class="nav-link is-active">Simulace</a>
-        </nav>
+        <div id="pageNavMount"></div>
       </header>
 
+      <section class="card member-filter-card" id="sharingGroupFilterSection" hidden>
+        <div class="member-filter-toolbar">
+          <label class="member-filter-label" for="sharingGroupSelect">Skupina sdílení:</label>
+          <select id="sharingGroupSelect" class="member-filter-select">
+            <option value="">-- Vyberte skupinu sdílení --</option>
+          </select>
+        </div>
+      </section>
+
       <section class="card controls">
-        <div class="control-grid">
-          <label>
-            CSV report
-            <input id="uploadCsv" type="file" accept=".csv,text/csv" />
-          </label>
-          <label>
-            EAN názvy (vlastní databáze)
-            <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
-          </label>
-          <label>
-            Počet opakování kol sdílení (EDC)
-            <input id="rounds" type="number" min="1" max="100" value="5" />
-          </label>
-          <label>
-            Pokusů v jedné iteraci (optimalizace)
-            <input id="maxFails" type="number" min="10" max="1000000" value="600" />
-          </label>
-          <label>
-            Počet restartů (optimalizace)
-            <input id="restarts" type="number" min="1" max="2000" value="25" />
-          </label>
+        <div id="fileUploadControls">
+          <div id="csvUploadControls" class="control-grid">
+            <label>
+              CSV report
+              <input id="uploadCsv" type="file" accept=".csv,text/csv" />
+            </label>
+            <label>
+              EAN názvy (vlastní databáze)
+              <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
+            </label>
+          </div>
+          <div id="simulationSettingsControls" class="control-grid">
+            <label>
+              Počet kol dle metodiky EDC
+              <input id="rounds" type="number" min="1" max="5" value="5" />
+            </label>
+            <label>
+              Pokusů v jedné iteraci (optimalizace)
+              <input id="maxFails" type="number" min="10" max="1000000" value="600" />
+            </label>
+            <label>
+              Počet restartů (optimalizace)
+              <input id="restarts" type="number" min="1" max="2000" value="25" />
+            </label>
+          </div>
         </div>
         <p id="status" class="status">Čekám na nahrání CSV...</p>
         <p id="eanLabelsStatus" class="status" style="font-size: 0.85rem; color: #5f6d5c; margin-top: 0.3rem;">EAN databáze: připraveno</p>
@@ -99,17 +109,49 @@
       <section class="card" id="simulationSection" hidden>
         <h2>Simulace a optimalizace</h2>
         <p class="muted">
-          Alokace se nastavují na odběrné EAN a aplikují se na celkovou dostupnou výrobu.
-          Výsledek je navíc rozdělen i na konkrétní příspěvek každého výrobního EAN.
+          Simulace používá metodiku EDC po prioritách a iteračních kolech. Aplikace sama hledá nejlepší alokace pro maximální sdílení, bez zadávání cen nebo ručních preferencí.
         </p>
+
+        <h3>Váhy historického modelu</h3>
+        <div class="history-weights-grid">
+          <label>
+            Aktuální měsíc
+            <input id="weightCurrentMonth" data-kind="hist-weight" data-weight-key="currentMonth" type="number" min="0" max="10" step="0.1" value="1.1" />
+          </label>
+          <label>
+            Stejný měsíc loni
+            <input id="weightLastYearSameMonth" data-kind="hist-weight" data-weight-key="lastYearSameMonth" type="number" min="0" max="10" step="0.1" value="2.4" />
+          </label>
+          <label>
+            Poslední 4 týdny
+            <input id="weightRecentWeeks" data-kind="hist-weight" data-weight-key="recentWeeks" type="number" min="0" max="10" step="0.1" value="0.7" />
+          </label>
+          <label>
+            Ostatní historie
+            <input id="weightBaseline" data-kind="hist-weight" data-weight-key="baseline" type="number" min="0" max="10" step="0.1" value="0.2" />
+          </label>
+        </div>
+        <p id="historicalWeightsStatus" class="status"></p>
+
+        <h3>Metodická matice alokací a priorit</h3>
+        <div class="table-wrap"><table id="methodologyMatrix"></table></div>
+        <div class="table-wrap"><table id="methodologyPriorityMatrix"></table></div>
+
+        <h3>Doporučení nastavení alokací (1-5 výrobců na odběrné místo)</h3>
+        <div class="table-wrap"><table id="consumerProducerRecommendations"></table></div>
+
         <div class="table-wrap"><table id="allocationsTable"></table></div>
 
         <div class="action-row">
-          <button id="simulateBtn" class="btn btn-primary">Simulovat sdílení</button>
-          <button id="optimizeBtn" class="btn btn-secondary">Najít optimální alokace</button>
-          <button id="exportBtn" class="btn btn-ghost" disabled>Export výsledků CSV</button>
+          <button id="simulateBtn" class="btn btn-primary">Najít nejlepší alokace a simulovat</button>
+          <button id="exportBtn" class="btn btn-ghost" disabled>Export EDC CSV</button>
+          <button id="exportReadableBtn" class="btn btn-ghost" disabled>Export přehledný CSV</button>
         </div>
         <p id="optProgress" class="status"></p>
+        <div id="simProgressBar" style="display:none;margin-top:8px;">
+          <progress id="simProgressValue" max="100" value="0" style="width:100%;height:12px;"></progress>
+          <span id="simProgressEta" class="status" style="font-size:0.85em;"></span>
+        </div>
 
         <div class="table-wrap"><table id="simulationResult"></table></div>
         <div class="table-wrap"><table id="producerConsumerMatrix"></table></div>
@@ -138,6 +180,8 @@
     </main>
 
     <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script defer src="auth-config.js"></script>
+    <script defer src="auth-client.js"></script>
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
 </html>

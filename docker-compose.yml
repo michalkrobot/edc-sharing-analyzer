@@ -1,0 +1,55 @@
+services:
+  db:
+    image: timescale/timescaledb:2.21.1-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: edc
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-edc_local}
+    volumes:
+      - edc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8787:8080"
+    environment:
+      PORT: "8080"
+      CONNECTION_STRING: "Host=db;Port=5432;Database=edc;Username=postgres;Password=${DB_PASSWORD:-edc_local}"
+      AUTH_PEPPER: "${AUTH_PEPPER:-change-me-in-production}"
+      AUTH_BASE_URL: "${AUTH_BASE_URL:-}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-*}"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CF_API_TOKEN: ${CF_API_TOKEN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  edc_pgdata:
+  caddy_data:
+  caddy_config:

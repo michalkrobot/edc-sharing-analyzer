@@ -2,6 +2,10 @@
 .DS_Store
 Thumbs.db
 
+# Secrets — nikdy necommitovat
+.env
+deploy/secrets.env
+
 # Logs
 *.log
 
@@ -13,3 +17,11 @@ Export-dat-*.csv
 
 # Node artifacts (if ever used)
 node_modules/
+
+# .NET build artifacts
+backend-net/src/Edc.Backend.Api/bin/
+backend-net/src/Edc.Backend.Api/obj/
+
+# Local data directory
+data/
+
