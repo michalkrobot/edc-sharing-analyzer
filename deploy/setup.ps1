@@ -2,8 +2,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ResourceGroup       = "rg-edc"
-$Location            = "northeurope"      # vse ve stejnem regionu = zadne cross-region poplatky
-$PostgresLocation    = "northeurope"
+$Location            = "westeurope"       # resource group uz existuje v westeurope
+$PostgresLocation    = "northeurope"      # PostgreSQL + Container Apps v northeurope
 $RandomSuffix        = -join ((97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
 $PostgresServer      = "edc-postgres-" + $RandomSuffix
 $PostgresAdmin       = "edcadmin"
@@ -72,7 +72,7 @@ az postgres flexible-server restart --resource-group $ResourceGroup --name $Post
 Start-Sleep -Seconds 30
 
 Write-Host "=== 4/6 Container Apps Environment ===" -ForegroundColor Cyan
-az containerapp env create --name $ContainerAppEnv --resource-group $ResourceGroup --location $Location
+az containerapp env create --name $ContainerAppEnv --resource-group $ResourceGroup --location $PostgresLocation
 
 $PgHost = $PostgresServer + ".postgres.database.azure.com"
 $ConnStr = "Host=" + $PgHost + ";Port=5432;Database=" + $PostgresDb + ";Username=" + $PostgresAdmin + ";Password=" + $PostgresPassword + ";Ssl Mode=Require;"
