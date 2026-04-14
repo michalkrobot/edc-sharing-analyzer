@@ -56,6 +56,31 @@ body {
   z-index: 1;
 }
 
+.embed-shell {
+  width: min(1320px, 98vw);
+  margin: 1rem auto 1.5rem;
+}
+
+body[data-page="enerkom-report"] {
+  background: #f4f7f2;
+}
+
+body[data-page="enerkom-report"] .bg-shape {
+  display: none;
+}
+
+#embedCodeOutput {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0.65rem;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  resize: vertical;
+}
+
 body.auth-locked .app-shell {
   filter: blur(2px);
 }
@@ -1240,6 +1265,27 @@ th.ean {
   margin-top: 0.75rem;
 }
 
+.time-preset-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-top: 0.75rem;
+}
+
+.time-preset-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.time-preset-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.6rem;
+}
+
 .time-range-field {
   display: grid;
   gap: 0.3rem;
@@ -2310,6 +2356,12 @@ body[data-page="sharing"] .chart-canvas {
 @media (max-width: 840px) {
   .member-filter-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .time-preset-toolbar,
+  .time-preset-custom {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .time-range-filter {

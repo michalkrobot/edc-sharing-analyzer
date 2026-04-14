@@ -14,6 +14,7 @@ COPY index.html \
      multi-ean-analyzer.html \
      member-sharing.html \
      multi-ean-sharing.html \
+     enerkom-report.html \
      multi-ean-analyzer.js \
      multi-ean-analyzer.css \
      auth-client.js \

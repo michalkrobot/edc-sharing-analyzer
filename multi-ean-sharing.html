@@ -54,13 +54,30 @@
         </section>
       </header>
 
-      <section class="card member-filter-card" id="sharingGroupFilterSection" hidden>
+      <section class="card" id="sharingGroupFilterSection" hidden>
         <div class="member-filter-toolbar">
           <label class="member-filter-label" for="sharingGroupSelect">Skupina sdílení:</label>
           <select id="sharingGroupSelect" class="member-filter-select">
             <option value="">-- Vyberte skupinu sdílení --</option>
           </select>
         </div>
+      </section>
+
+      <section class="card" id="embedSettingsSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Nastavení vložení</h2>
+          <span class="sharing-section-chip">Embed</span>
+        </div>
+        <p class="section-description">Zkopíruj kód a vlož ho na cílovou stránku.</p>
+        <p class="section-description">
+          Postup vložení: 1) ponech v URL parametr tenantId, 2) zkopíruj níže uvedený iframe,
+          3) vlož jej do HTML cílové stránky na místo, kde chceš zobrazit report,
+          4) publikuj změny na cílovém webu.
+        </p>
+        <label class="time-range-field" for="embedCodeOutput">
+          Kód pro vložení
+          <textarea id="embedCodeOutput" rows="5" readonly></textarea>
+        </label>
       </section>
 
       <section class="card controls">
@@ -86,6 +103,28 @@
           <span class="sharing-section-chip">Globální filtr</span>
         </div>
         <p class="section-description">Nastav období od a do. Filtr ovlivní všechny tabulky i grafy na stránce.</p>
+        <div class="time-preset-toolbar" aria-label="Předvolby období">
+          <div class="time-preset-quick">
+            <button id="presetThisMonthBtn" type="button" class="btn btn-ghost">Tento měsíc</button>
+            <button id="presetLastMonthBtn" type="button" class="btn btn-ghost">Minulý měsíc</button>
+          </div>
+          <div class="time-preset-custom">
+            <label class="time-range-field" for="timePresetSelect">
+              Předvolba
+              <select id="timePresetSelect" class="member-filter-select">
+                <option value="thisMonth" selected>Tento měsíc</option>
+                <option value="lastMonth">Minulý měsíc</option>
+                <option value="today">Dnes</option>
+                <option value="yesterday">Včera</option>
+                <option value="last7d">Posledních 7 dní</option>
+                <option value="last30d">Posledních 30 dní</option>
+                <option value="thisYear">Tento rok</option>
+                <option value="custom">Vlastní rozsah</option>
+              </select>
+            </label>
+            <button id="timePresetApplyBtn" type="button" class="btn btn-secondary">Použít předvolbu</button>
+          </div>
+        </div>
         <div class="time-range-filter">
           <label class="time-range-field" for="filterDateFrom">
             Od
@@ -210,12 +249,6 @@
           <span class="sharing-section-chip">Denní maximum</span>
         </div>
         <p class="section-description">Den s nejvyšším celkovým sdílením.</p>
-        <div class="chart-controls">
-          <label class="toggle-label">
-            <input type="checkbox" id="bestDayShowConsumption" checked />
-            Zobrazit spotřebu
-          </label>
-        </div>
         <div id="bestDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 
@@ -224,13 +257,7 @@
           <h2>Průměrný den</h2>
           <span class="sharing-section-chip">Typický průběh</span>
         </div>
-        <p class="section-description">Průměr přes všechny dny v souboru – výroba, spotřeba a sdílení po 15minutových intervalech.</p>
-        <div class="chart-controls">
-          <label class="toggle-label">
-            <input type="checkbox" id="avgDayShowConsumption" checked />
-            Zobrazit spotřebu
-          </label>
-        </div>
+        <p class="section-description">Průměr přes všechny dny v souboru - výroba, spotřeba a sdílení po 15minutových intervalech.</p>
         <div id="averageDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 

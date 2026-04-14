@@ -40,9 +40,14 @@ const dom = {
   timeThermometerMaxLabel: document.getElementById("timeThermometerMaxLabel"),
   timeFilterResetBtn: document.getElementById("timeFilterResetBtn"),
   timeFilterInfo: document.getElementById("timeFilterInfo"),
+  timePresetSelect: document.getElementById("timePresetSelect"),
+  timePresetApplyBtn: document.getElementById("timePresetApplyBtn"),
+  presetThisMonthBtn: document.getElementById("presetThisMonthBtn"),
+  presetLastMonthBtn: document.getElementById("presetLastMonthBtn"),
   allocationsTable: document.getElementById("allocationsTable"),
   methodologyMatrix: document.getElementById("methodologyMatrix"),
   methodologyPriorityMatrix: document.getElementById("methodologyPriorityMatrix"),
+  consumerProducerRecommendations: document.getElementById("consumerProducerRecommendations"),
   simulationResult: document.getElementById("simulationResult"),
   producerConsumerMatrix: document.getElementById("producerConsumerMatrix"),
   consumerChart: document.getElementById("consumerChart"),
@@ -51,11 +56,12 @@ const dom = {
   simulateBtn: document.getElementById("simulateBtn"),
   optimizeBtn: document.getElementById("optimizeBtn"),
   exportBtn: document.getElementById("exportBtn"),
+  exportReadableBtn: document.getElementById("exportReadableBtn"),
   optProgress: document.getElementById("optProgress"),
 };
 
 const pageMode = document.body.dataset.page || "simulation";
-const isSharingLikePage = pageMode === "sharing" || pageMode === "member-sharing";
+const isSharingLikePage = pageMode === "sharing" || pageMode === "member-sharing" || pageMode === "enerkom-report";
 const isMemberSharingPage = pageMode === "member-sharing";
 
 // Pre-fill date filters with current calendar month for server-backed pages
@@ -586,7 +592,7 @@ function parseDatetimeLocalValue(value) {
 }
 
 function ensureAllocationSourceSection() {
-  if (!(isSharingLikePage || pageMode === "simulation")) {
+  if (!(pageMode === "sharing" || pageMode === "member-sharing" || pageMode === "simulation")) {
     return null;
   }
 
@@ -671,6 +677,10 @@ function getAllocationModeInfo(data) {
 }
 
 function renderAllocationSourceInfo(data) {
+  if (pageMode === "enerkom-report") {
+    return;
+  }
+
   const section = ensureAllocationSourceSection();
   if (!section) {
     return;
@@ -911,6 +921,9 @@ function renderMeta(data) {
 }
 
 function renderSummary(data) {
+  if (!dom.summarySection) {
+    return;
+  }
   const { producerStats, consumerStats } = aggregateSummary(data);
   const ownProducerSet = isMemberSharingPage && gMemberScope && Array.isArray(gMemberScope.ownProducers)
     ? new Set(gMemberScope.ownProducers)
@@ -1149,70 +1162,31 @@ function renderAllocationInputs(data) {
   dom.simulationSection.hidden = false;
   const historicalModel = getHistoricalSharingModel(data);
   renderMethodologyMatrix(data, historicalModel);
-  const remembered = data.consumers.map((c, idx) => {
-    const storedValue = localStorage.getItem(`multi_ean_alloc_${c.name}`);
-    if (storedValue !== null && storedValue !== "") {
-      return Number.parseFloat(storedValue) || 0;
-    }
-    return historicalModel.suggestedAllocations[idx] || 0;
-  });
-
-  const rememberedCost = data.consumers.map((c) => Number.parseFloat(localStorage.getItem(`multi_ean_cost_${c.name}`) || "2"));
-
+  renderConsumerProducerRecommendations(data, historicalModel);
   dom.allocationsTable.innerHTML =
-    "<thead><tr><th class='ean'>Odběrný EAN</th><th>Preference [%]</th><th>Doporučeno [%]</th><th>Cena [Kč/kWh]</th><th>Prioritní výrobny</th><th>Souhrn</th></tr></thead>";
+    "<thead><tr><th class='ean'>Výrobní EAN</th><th>Návrh alokačního klíče výrobna → odběr</th><th>Optimalizovaný klíč výrobna → odběr</th><th>Součet optimalizace [%]</th><th>Souhrn</th></tr></thead>";
   const body = document.createElement("tbody");
 
-  data.consumers.forEach((c, i) => {
+  data.producers.forEach((producer, producerIndex) => {
+    const baselineRow = Array.isArray(historicalModel.baseAllocations[producerIndex])
+      ? historicalModel.baseAllocations[producerIndex]
+      : [];
+    const baselineSummary = summarizeProducerAllocationRow(baselineRow, data.consumers);
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td class='ean'>${displayEan(c.name)}</td>
-       <td><input data-kind='alloc' data-index='${i}' type='number' min='0' max='100' step='0.01' value='${remembered[i].toFixed(2)}' /></td>
-       <td>${formatPercent(historicalModel.suggestedAllocations[i] || 0)}</td>
-       <td><input data-kind='cost' data-index='${i}' type='number' min='0' max='100' step='0.01' value='${rememberedCost[i].toFixed(2)}' /></td>
-       <td class='ean'>${describePrioritySources(data, historicalModel, i)}</td>
-       <td id='rowResult_${i}' class='ean'>-</td>`;
+      `<td class='ean'>${displayEan(producer.name)}</td>
+       <td class='ean'>${baselineSummary}</td>
+       <td id='optimalProducerAlloc_${producerIndex}' class='ean'>-</td>
+       <td id='optimalProducerAllocSum_${producerIndex}'>-</td>
+       <td id='rowResultProducer_${producerIndex}' class='ean'>-</td>`;
     body.appendChild(tr);
   });
 
-  const sumRow = document.createElement("tr");
-  sumRow.innerHTML = "<td class='ean'><strong>Součet alokací</strong></td><td id='allocSumCell'><strong>0.00 %</strong></td><td></td><td></td><td class='ean'>Metodika EDC používá priority po výrobnách a kola sdílení.</td><td></td>";
-  body.appendChild(sumRow);
+  const noteRow = document.createElement("tr");
+  noteRow.innerHTML = "<td class='ean' colspan='5'>Každá výrobna má vlastní alokační klíč na odběrná místa. Součet alokací jedné výrobny je v metodice omezen na max. 100 %.</td>";
+  body.appendChild(noteRow);
 
   dom.allocationsTable.appendChild(body);
-  updateAllocationSum();
-}
-
-function readAllocationInputs() {
-  const allocations = [];
-  const costs = [];
-
-  document.querySelectorAll("input[data-kind='alloc']").forEach((el) => {
-    allocations.push(Number.parseFloat(el.value) || 0);
-  });
-  document.querySelectorAll("input[data-kind='cost']").forEach((el) => {
-    costs.push(Number.parseFloat(el.value) || 0);
-  });
-
-  if (gData) {
-    gData.consumers.forEach((c, i) => {
-      localStorage.setItem(`multi_ean_alloc_${c.name}`, String(allocations[i]));
-      localStorage.setItem(`multi_ean_cost_${c.name}`, String(costs[i]));
-    });
-  }
-
-  return { allocations, costs };
-}
-
-function updateAllocationSum() {
-  const { allocations } = readAllocationInputs();
-  const s = sum(allocations);
-  const cell = document.getElementById("allocSumCell");
-  if (!cell) {
-    return;
-  }
-  const cls = s <= 100.0001 ? "value-ok" : "value-danger";
-  cell.innerHTML = `<strong class='${cls}'>${s.toFixed(2)} %</strong>`;
 }
 
 const METHODOLOGY_MAX_ROUNDS = 5;
@@ -1590,7 +1564,7 @@ function renderMethodologyMatrix(data, model) {
 
   const priorityHead = document.createElement("thead");
   const priorityHeadRow = document.createElement("tr");
-  priorityHeadRow.innerHTML = "<th class='ean'>Odběrný EAN</th><th>Doporučeno [%]</th><th>Priorita 1</th><th>Priorita 2</th><th>Priorita 3</th><th>Priorita 4</th><th>Priorita 5</th>";
+  priorityHeadRow.innerHTML = "<th class='ean'>Odběrný EAN</th><th>Doporučený podíl sdílení [%]</th><th>Priorita 1</th><th>Priorita 2</th><th>Priorita 3</th><th>Priorita 4</th><th>Priorita 5</th>";
   priorityHead.appendChild(priorityHeadRow);
   dom.methodologyPriorityMatrix.appendChild(priorityHead);
 
@@ -1615,6 +1589,71 @@ function renderMethodologyMatrix(data, model) {
   dom.methodologyPriorityMatrix.appendChild(priorityBody);
 
   renderHistoricalWeightsStatus(model);
+}
+
+function getConsumerProducerRecommendations(data, model, consumerIndex) {
+  const pairs = data.producers.map((producer, producerIndex) => ({
+    producerIndex,
+    ean: displayEan(producer.name),
+    weightedShared: Number(model.weightedPairShared[producerIndex] && model.weightedPairShared[producerIndex][consumerIndex]) || 0,
+  }));
+
+  const weightedTotal = pairs.reduce((sumValue, item) => sumValue + item.weightedShared, 0);
+  if (weightedTotal > 0.001) {
+    return pairs
+      .map((item) => ({
+        ...item,
+        percent: (item.weightedShared / weightedTotal) * 100,
+      }))
+      .filter((item) => item.percent > 0.09)
+      .sort((a, b) => b.percent - a.percent)
+      .slice(0, MAX_PRIORITY_LINKS);
+  }
+
+  const priorities = model.prioritiesByConsumer[consumerIndex] || [];
+  const fallbackCount = Math.min(MAX_PRIORITY_LINKS, priorities.length);
+  if (fallbackCount <= 0) {
+    return [];
+  }
+
+  const equalShare = 100 / fallbackCount;
+  return priorities.slice(0, fallbackCount).map((producerIndex) => ({
+    producerIndex,
+    ean: displayEan(data.producers[producerIndex].name),
+    weightedShared: 0,
+    percent: equalShare,
+  }));
+}
+
+function renderConsumerProducerRecommendations(data, model) {
+  if (!dom.consumerProducerRecommendations) {
+    return;
+  }
+
+  dom.consumerProducerRecommendations.innerHTML = "";
+
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  headRow.innerHTML = "<th class='ean'>Odběrný EAN</th><th>Doporučený podíl sdílení odběrného EAN [%]</th><th>Doporučené výrobní EAN 1-5 (podíl sdílení [%])</th>";
+  head.appendChild(headRow);
+  dom.consumerProducerRecommendations.appendChild(head);
+
+  const body = document.createElement("tbody");
+  data.consumers.forEach((consumer, consumerIndex) => {
+    const row = document.createElement("tr");
+    const recommendations = getConsumerProducerRecommendations(data, model, consumerIndex);
+    const recommendationText = recommendations.length > 0
+      ? recommendations.map((item, index) => `${index + 1}. ${item.ean} (${formatPercent(item.percent)})`).join("<br>")
+      : "Bez doporučení (chybí historická data).";
+
+    row.innerHTML =
+      `<td class='ean'>${displayEan(consumer.name)}</td>
+       <td>${formatPercent(model.suggestedAllocations[consumerIndex] || 0)}</td>
+       <td class='ean'>${recommendationText}</td>`;
+    body.appendChild(row);
+  });
+
+  dom.consumerProducerRecommendations.appendChild(body);
 }
 
 function buildSimulationPlan(data, consumerPreferences) {
@@ -1895,7 +1934,32 @@ function optimizeAllocations(data, costsPerKwh, rounds, maxFails, restarts, prog
 
 function renderSimulationResult(data, result) {
   dom.simulationResult.innerHTML =
-    "<thead><tr><th class='ean'>Odběrný EAN</th><th>Sdíleno</th><th>Zisk</th><th>Průměr na kolo</th></tr></thead>";
+    "<thead><tr><th class='ean'>Odběrný EAN</th><th>Sdíleno</th><th>Průměr na kolo</th></tr></thead>";
+
+  const producerAllocationMatrix = Array.isArray(result.producerAllocationMatrix)
+    ? result.producerAllocationMatrix
+    : [];
+
+  data.producers.forEach((producer, producerIndex) => {
+    const optimizedCell = document.getElementById(`optimalProducerAlloc_${producerIndex}`);
+    const sumCell = document.getElementById(`optimalProducerAllocSum_${producerIndex}`);
+    const summaryCell = document.getElementById(`rowResultProducer_${producerIndex}`);
+    const row = Array.isArray(producerAllocationMatrix[producerIndex])
+      ? producerAllocationMatrix[producerIndex]
+      : [];
+    const rowSum = row.reduce((acc, value) => acc + (Number(value) || 0), 0);
+
+    if (optimizedCell) {
+      optimizedCell.innerHTML = summarizeProducerAllocationRow(row, data.consumers);
+    }
+    if (sumCell) {
+      sumCell.textContent = formatPercent(rowSum);
+      sumCell.style.color = rowSum > 100.0001 ? "#c2410c" : "";
+    }
+    if (summaryCell) {
+      summaryCell.textContent = `Sdíleno ${fmt(result.sharingPerProducer[producerIndex] || 0)}`;
+    }
+  });
 
   const body = document.createElement("tbody");
   for (let i = 0; i < data.consumers.length; i += 1) {
@@ -1903,18 +1967,14 @@ function renderSimulationResult(data, result) {
     const avgPerRound = sum(result.sharingPerRoundPerEan.map((row) => row[i])) / result.sharingPerRoundPerEan.length;
 
     tr.innerHTML =
-      `<td class='ean'>${displayEan(data.consumers[i].name)}</td><td>${fmt(result.sharingPerEan[i])}</td><td>${result.profitPerEan[i].toFixed(2)} Kc</td><td>${fmt(avgPerRound)}</td>`;
+      `<td class='ean'>${displayEan(data.consumers[i].name)}</td><td>${fmt(result.sharingPerEan[i])}</td><td>${fmt(avgPerRound)}</td>`;
     body.appendChild(tr);
 
-    const rowResult = document.getElementById(`rowResult_${i}`);
-    if (rowResult) {
-      rowResult.textContent = `Sdíleno ${result.sharingPerEan[i].toFixed(2)} kWh | ${result.profitPerEan[i].toFixed(2)} Kč`;
-    }
   }
 
   const total = document.createElement("tr");
   total.innerHTML =
-    `<td class='ean'><strong>CELKEM</strong></td><td><strong>${fmt(result.totalSharing)}</strong></td><td><strong>${result.totalProfit.toFixed(2)} Kc</strong></td><td></td>`;
+    `<td class='ean'><strong>CELKEM</strong></td><td><strong>${fmt(result.totalSharing)}</strong></td><td></td>`;
   body.appendChild(total);
 
   dom.simulationResult.appendChild(body);
@@ -2943,6 +3003,7 @@ function renderProducerDailyTotalsChart(data) {
   }
 
   const shouldRenderForPage = pageMode === "sharing"
+    || pageMode === "enerkom-report"
     || (isMemberSharingPage && getMemberOwnedProducerCount() > 0);
   if (!shouldRenderForPage) {
     section.hidden = true;
@@ -3153,20 +3214,30 @@ function renderProducerDailyTotalsChart(data) {
     },
     series: [
       {
-        name: "Nesdílená výroba",
-        type: "bar",
-        stack: "daily-production",
-        data: remainderValues,
-        barMaxWidth: 30,
-        itemStyle: { color: "#2563eb" },
-      },
-      {
         name: "Sdílení",
         type: "bar",
         stack: "daily-production",
         data: points.map((point) => point.shared),
         barMaxWidth: 30,
-        itemStyle: { color: "#10b981" },
+        itemStyle: {
+          color: makeExecutiveGradient("#92cec1", "#5ea99b"),
+          borderRadius: [0, 0, 3, 3],
+          borderColor: "rgba(255,255,255,0.45)",
+          borderWidth: 0.6,
+        },
+      },
+      {
+        name: "Nesdílená výroba",
+        type: "bar",
+        stack: "daily-production",
+        data: remainderValues,
+        barMaxWidth: 30,
+        itemStyle: {
+          color: makeExecutiveGradient("#f6b1b1", "#e67b7b"),
+          borderRadius: [3, 3, 0, 0],
+          borderColor: "rgba(255,255,255,0.5)",
+          borderWidth: 0.6,
+        },
       },
     ],
   }));
@@ -3493,48 +3564,188 @@ function makeCsvRow(values) {
   return `${values.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")}\n`;
 }
 
-function buildResultCsv(data, result) {
-  let csv = "";
-  csv += makeCsvRow(["Summary", "Value"]);
-  csv += makeCsvRow(["File", data.filename]);
-  csv += makeCsvRow(["From", printDate(data.dateFrom)]);
-  csv += makeCsvRow(["To", printDate(data.dateTo)]);
-  csv += makeCsvRow(["Total sharing kWh", fmtNum(result.totalSharing)]);
-  csv += makeCsvRow(["Total profit CZK", fmtNum(result.totalProfit)]);
-  csv += "\n";
+function makeSemicolonRow(values) {
+  return `${values.map((v) => String(v ?? "")).join(";")}\n`;
+}
 
-  csv += makeCsvRow(["Consumer", "Allocation %", "Sharing kWh", "Profit CZK"]);
-  result.allocations.forEach((a, i) => {
-    csv += makeCsvRow([
-      data.consumers[i].name,
-      fmtNum(a),
-      fmtNum(result.sharingPerEan[i]),
-      fmtNum(result.profitPerEan[i]),
-    ]);
-  });
-  csv += "\n";
+function formatDateDdMmYyyy(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
+}
 
-  csv += makeCsvRow(["Producer", "Contributed sharing kWh"]);
-  result.sharingPerProducer.forEach((s, i) => {
-    csv += makeCsvRow([data.producers[i].name, fmtNum(s)]);
-  });
-  csv += "\n";
-
-  csv += makeCsvRow(["Producer", ...data.consumers.map((c) => c.name)]);
-  for (let p = 0; p < data.producers.length; p += 1) {
-    csv += makeCsvRow([
-      data.producers[p].name,
-      ...data.consumers.map((_, c) => fmtNum(result.producerToConsumer[p][c])),
-    ]);
+function formatEdcAllocationKey(percentValue) {
+  const value = Math.max(0, (Number(percentValue) || 0) / 100);
+  if (value <= 0) {
+    return "";
   }
-  csv += "\n";
+  const formatted = value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  return formatted.replace(".", ",");
+}
 
-  csv += makeCsvRow(["Interval", "Production kWh", "Consumption kWh", "Shared kWh"]);
-  result.intervalTotals.forEach((it) => {
-    csv += makeCsvRow([it.label, fmtNum(it.production), fmtNum(it.consumption), fmtNum(it.shared)]);
+function getEdcExportContext() {
+  const groupContext = getSimGroupContext();
+  const groupId = String(groupContext.groupId || "");
+
+  const today = new Date();
+  const validFrom = new Date(today.getFullYear(), today.getMonth(), 1);
+  return {
+    groupId,
+    operation: "Editovat",
+    dateFrom: formatDateDdMmYyyy(validFrom),
+    dateTo: "31.12.9999",
+  };
+}
+
+function buildResultCsv(data, result) {
+  const producerAllocationMatrix = Array.isArray(result.producerAllocationMatrix)
+    ? result.producerAllocationMatrix
+    : [];
+  const exportContext = getEdcExportContext();
+
+  let csv = "";
+  csv += makeSemicolonRow([
+    "IdSkupinySdileni",
+    "Operace",
+    "EANo",
+    "DatumOd",
+    "DatumDo",
+    "EANd1",
+    "AlokacniKlic1",
+    "EANd2",
+    "AlokacniKlic2",
+    "EANd3",
+    "AlokacniKlic3",
+    "EANd4",
+    "AlokacniKlic4",
+    "EANd5",
+    "AlokacniKlic5",
+  ]);
+
+  data.consumers.forEach((consumer, consumerIndex) => {
+    const producerAllocations = data.producers
+      .map((producer, producerIndex) => ({
+        producerEan: producer.name,
+        allocationPercent: Number(producerAllocationMatrix[producerIndex] && producerAllocationMatrix[producerIndex][consumerIndex]) || 0,
+      }))
+      .filter((item) => item.allocationPercent > 0.0001)
+      .sort((a, b) => b.allocationPercent - a.allocationPercent)
+      .slice(0, 5);
+
+    const pairColumns = [];
+    for (let i = 0; i < 5; i += 1) {
+      const allocation = producerAllocations[i];
+      if (allocation) {
+        pairColumns.push(allocation.producerEan, formatEdcAllocationKey(allocation.allocationPercent));
+      } else {
+        pairColumns.push("", "");
+      }
+    }
+
+    csv += makeSemicolonRow([
+      exportContext.groupId,
+      exportContext.operation,
+      consumer.name,
+      exportContext.dateFrom,
+      exportContext.dateTo,
+      ...pairColumns,
+    ]);
   });
 
   return csv;
+}
+
+function buildReadableCsv(data, result) {
+  const producerAllocationMatrix = Array.isArray(result.producerAllocationMatrix)
+    ? result.producerAllocationMatrix
+    : [];
+
+  const eanLabel = (ean) => gEanLabelMap.get(normalizeEan(ean)) || "";
+
+  const formatPercent2 = (pct) => {
+    const val = Math.max(0, Number(pct) || 0);
+    return val > 0 ? val.toFixed(2).replace(".", ",") + " %" : "";
+  };
+
+  let csv = "";
+  csv += makeSemicolonRow([
+    "EANo",
+    "NazevOdbernehomista",
+    "EANd1",
+    "NazevVyrobny1",
+    "AlokacniKlic1",
+    "EANd2",
+    "NazevVyrobny2",
+    "AlokacniKlic2",
+    "EANd3",
+    "NazevVyrobny3",
+    "AlokacniKlic3",
+    "EANd4",
+    "NazevVyrobny4",
+    "AlokacniKlic4",
+    "EANd5",
+    "NazevVyrobny5",
+    "AlokacniKlic5",
+  ]);
+
+  data.consumers.forEach((consumer, consumerIndex) => {
+    const producerAllocations = data.producers
+      .map((producer, producerIndex) => ({
+        producerEan: producer.name,
+        allocationPercent: Number(producerAllocationMatrix[producerIndex] && producerAllocationMatrix[producerIndex][consumerIndex]) || 0,
+      }))
+      .filter((item) => item.allocationPercent > 0.0001)
+      .sort((a, b) => b.allocationPercent - a.allocationPercent)
+      .slice(0, 5);
+
+    const pairColumns = [];
+    for (let i = 0; i < 5; i += 1) {
+      const allocation = producerAllocations[i];
+      if (allocation) {
+        pairColumns.push(
+          allocation.producerEan,
+          eanLabel(allocation.producerEan),
+          formatPercent2(allocation.allocationPercent),
+        );
+      } else {
+        pairColumns.push("", "", "");
+      }
+    }
+
+    csv += makeSemicolonRow([
+      consumer.name,
+      eanLabel(consumer.name),
+      ...pairColumns,
+    ]);
+  });
+
+  return csv;
+}
+
+function summarizeProducerAllocationRow(row, consumers, maxItems = 5) {
+  if (!Array.isArray(row) || row.length === 0) {
+    return "-";
+  }
+
+  const items = row
+    .map((value, index) => ({
+      index,
+      value: Number(value) || 0,
+    }))
+    .filter((item) => item.value > 0.009)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, Math.max(1, maxItems));
+
+  if (items.length === 0) {
+    return "Bez aktivní alokace";
+  }
+
+  return items
+    .map((item) => {
+      const consumer = consumers[item.index];
+      const consumerName = consumer ? displayEan(consumer.name) : `Odběr ${item.index + 1}`;
+      return `${consumerName} (${formatPercent(item.value)})`;
+    })
+    .join("<br>");
 }
 
 function triggerCsvDownload(filename, content) {
@@ -3562,6 +3773,67 @@ function setCurrentMonthFilter() {
   dom.filterDateFrom.value = toDatetimeLocalValue(new Date(from));
   dom.filterDateTo.value   = toDatetimeLocalValue(new Date(to));
   syncTimeThermometerFromInputs();
+}
+
+function getTimePresetRangeMs(preset) {
+  const now = new Date();
+  const thisMonthFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const thisMonthTo = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+
+  if (preset === "thisMonth") {
+    return { from: thisMonthFrom.getTime(), to: thisMonthTo.getTime() };
+  }
+  if (preset === "lastMonth") {
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const to = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    return { from: from.getTime(), to: to.getTime() };
+  }
+  if (preset === "today") {
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const to = new Date(from.getTime() + 24 * 60 * 60 * 1000);
+    return { from: from.getTime(), to: to.getTime() };
+  }
+  if (preset === "yesterday") {
+    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+    return { from: from.getTime(), to: to.getTime() };
+  }
+  if (preset === "last7d") {
+    return { from: now.getTime() - 7 * 24 * 60 * 60 * 1000, to: now.getTime() };
+  }
+  if (preset === "last30d") {
+    return { from: now.getTime() - 30 * 24 * 60 * 60 * 1000, to: now.getTime() };
+  }
+  if (preset === "thisYear") {
+    const from = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+    const to = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);
+    return { from: from.getTime(), to: to.getTime() };
+  }
+  return null;
+}
+
+function applyTimePreset(preset, triggerReload = true) {
+  if (!dom.filterDateFrom || !dom.filterDateTo) {
+    return;
+  }
+  const range = getTimePresetRangeMs(preset);
+  if (!range) {
+    return;
+  }
+
+  dom.filterDateFrom.value = toDatetimeLocalValue(new Date(range.from));
+  dom.filterDateTo.value = toDatetimeLocalValue(new Date(range.to));
+  syncTimeThermometerFromInputs();
+
+  if (!triggerReload) {
+    return;
+  }
+
+  if (isSharingLikePage) {
+    reloadServerDataWithCurrentFilter();
+  } else {
+    applyTimeFilterAndRender();
+  }
 }
 
 function getActiveDateRangeMs() {
@@ -3695,23 +3967,22 @@ function applyThermometerToDateInputs() {
 }
 
 function renderSharingPage(data) {
-  if (!dom.sharingSection) {
-    return;
-  }
-
-  if (isMemberSharingPage) {
-    dom.sharingSection.hidden = true;
-    if (dom.producerChart) {
-      destroyChartForElement(dom.producerChart);
+  if (dom.sharingSection) {
+    if (isMemberSharingPage) {
+      dom.sharingSection.hidden = true;
+      if (dom.producerChart) {
+        destroyChartForElement(dom.producerChart);
+      }
+    } else {
+      dom.sharingSection.hidden = false;
     }
-  } else {
-    dom.sharingSection.hidden = false;
   }
 
   const { producerStats } = aggregateSummary(data);
   if (dom.producerChart && !isMemberSharingPage) {
     drawProducerOverviewChart(dom.producerChart, producerStats, null);
   }
+  renderEmbedTenantTotals(data);
   renderProducerDailyTotalsChart(data);
   renderConsumerDailyTotalsChart(data);
   renderProducerPieCharts(producerStats);
@@ -3727,6 +3998,164 @@ function renderSharingPage(data) {
       ? "Zobrazen přehled výroben: sdílení a zůstatek po sdílení. Ušlá příležitost je v detailu po najetí myší."
       : "Ve zvoleném období nejsou žádná data. Uprav časový filtr.";
   }
+}
+
+function renderEmbedTenantTotals(data) {
+  if (pageMode !== "enerkom-report") {
+    return;
+  }
+
+  const totalProductionEl = document.getElementById("tenantTotalProduction");
+  const totalSharingEl = document.getElementById("tenantTotalSharing");
+  const currentMonthProductionEl = document.getElementById("tenantCurrentMonthProduction");
+  const currentMonthSharingEl = document.getElementById("tenantCurrentMonthSharing");
+  const lastMonthProductionEl = document.getElementById("tenantLastMonthProduction");
+  const lastMonthSharingEl = document.getElementById("tenantLastMonthSharing");
+  const totalCo2SavedEl = document.getElementById("tenantTotalCo2Saved");
+  const currentMonthCo2SavedEl = document.getElementById("tenantCurrentMonthCo2Saved");
+  const lastMonthCo2SavedEl = document.getElementById("tenantLastMonthCo2Saved");
+
+  if (!totalProductionEl || !totalSharingEl) {
+    return;
+  }
+
+  const now = new Date();
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+  const CO2_KG_PER_KWH = 0.4;
+
+  const totals = data.intervals.reduce((acc, interval) => {
+    const start = interval && interval.start instanceof Date ? interval.start : new Date(interval && interval.start);
+    const production = Number(interval.sumProduction) || 0;
+    const sharing = Number(interval.sumSharing) || 0;
+    acc.production += production;
+    acc.sharing += sharing;
+
+    if (start >= currentMonthStart && start < nextMonthStart) {
+      acc.currentMonthProduction += production;
+      acc.currentMonthSharing += sharing;
+    } else if (start >= lastMonthStart && start < currentMonthStart) {
+      acc.lastMonthProduction += production;
+      acc.lastMonthSharing += sharing;
+    }
+
+    return acc;
+  }, {
+    production: 0,
+    sharing: 0,
+    currentMonthProduction: 0,
+    currentMonthSharing: 0,
+    lastMonthProduction: 0,
+    lastMonthSharing: 0,
+  });
+
+  totalProductionEl.textContent = fmt(totals.production);
+  totalSharingEl.textContent = fmt(totals.sharing);
+
+  if (currentMonthProductionEl) {
+    currentMonthProductionEl.textContent = fmt(totals.currentMonthProduction);
+  }
+  if (currentMonthSharingEl) {
+    currentMonthSharingEl.textContent = fmt(totals.currentMonthSharing);
+  }
+  if (lastMonthProductionEl) {
+    lastMonthProductionEl.textContent = fmt(totals.lastMonthProduction);
+  }
+  if (lastMonthSharingEl) {
+    lastMonthSharingEl.textContent = fmt(totals.lastMonthSharing);
+  }
+
+  if (totalCo2SavedEl) {
+    totalCo2SavedEl.textContent = `${fmtNum(totals.sharing * CO2_KG_PER_KWH)} kg CO2`;
+  }
+  if (currentMonthCo2SavedEl) {
+    currentMonthCo2SavedEl.textContent = `${fmtNum(totals.currentMonthSharing * CO2_KG_PER_KWH)} kg CO2`;
+  }
+  if (lastMonthCo2SavedEl) {
+    lastMonthCo2SavedEl.textContent = `${fmtNum(totals.lastMonthSharing * CO2_KG_PER_KWH)} kg CO2`;
+  }
+}
+
+function setupEmbedSnippet() {
+  const embedSection = document.getElementById("embedSettingsSection");
+  const codeOutput = document.getElementById("embedCodeOutput");
+  if (!embedSection || !codeOutput) {
+    return;
+  }
+
+  if (pageMode === "enerkom-report") {
+    const params = new URLSearchParams(window.location.search);
+    const tenantId = params.get("tenantId") || "";
+    const srcUrl = `${window.location.origin}/enerkom-report.html?tenantId=${encodeURIComponent(tenantId)}`;
+    codeOutput.value = `<iframe src="${srcUrl}" style="width:100%;min-height:2200px;border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`;
+    embedSection.hidden = false;
+  } else if (pageMode === "sharing") {
+    const isAdmin = window.edcAuth && typeof window.edcAuth.isAdmin === "function"
+      ? window.edcAuth.isAdmin()
+      : false;
+    if (!isAdmin) {
+      embedSection.hidden = true;
+      return;
+    }
+    const tenantId = (window.edcAuth && typeof window.edcAuth.getTenantId === "function"
+      ? window.edcAuth.getTenantId()
+      : new URLSearchParams(window.location.search).get("tenantId")) || "";
+    const srcUrl = `${window.location.origin}/enerkom-report.html?tenantId=${encodeURIComponent(tenantId)}`;
+    codeOutput.value = `<iframe src="${srcUrl}" style="width:100%;min-height:2200px;border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`;
+    embedSection.hidden = false;
+  }
+}
+
+async function loadEmbedTenantData() {
+  if (pageMode !== "enerkom-report") {
+    return;
+  }
+
+  setupEmbedSnippet();
+
+  const params = new URLSearchParams(window.location.search);
+  const tenantId = params.get("tenantId") || "";
+  if (!tenantId) {
+    if (dom.status) {
+      dom.status.textContent = "Chybí parametr tenantId v URL.";
+    }
+    return;
+  }
+
+  if (dom.status) {
+    dom.status.textContent = "Načítám tenant data pro embed...";
+  }
+
+  const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
+  const response = await fetch(`${apiBase}/public/tenant-sharing-data?tenantId=${encodeURIComponent(tenantId)}`, {
+    method: "GET",
+  });
+
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    clearAllDataSections();
+    if (dom.status) {
+      dom.status.textContent = payload && payload.error ? payload.error : "Nepodařilo se načíst tenant data.";
+    }
+    return;
+  }
+
+  const nextLabels = payload && payload.eanLabels && typeof payload.eanLabels === "object"
+    ? payload.eanLabels
+    : {};
+  gMemberScope = null;
+  gEanLabelMap = new Map([...gEanLabelMap, ...Object.entries(nextLabels)]);
+  updateEanLabelsStatus();
+
+  const hydrated = hydrateServerSharingData(payload.data);
+  onDataLoaded(hydrated);
 }
 
 function renderCurrentView() {
@@ -3815,8 +4244,27 @@ function onDataLoaded(data) {
   if (dom.exportBtn) {
     dom.exportBtn.disabled = true;
   }
+  if (dom.exportReadableBtn) {
+    dom.exportReadableBtn.disabled = true;
+  }
 
   renderAllocationSourceInfo(data);
+
+  if (pageMode === "enerkom-report") {
+    const lastIntervalStart = data.intervals.length > 0
+      ? data.intervals[data.intervals.length - 1].start
+      : data.dateTo;
+    const toDate = new Date(lastIntervalStart.getTime());
+    const fromDate = new Date(toDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const boundedFrom = fromDate < data.dateFrom ? data.dateFrom : fromDate;
+
+    gFilteredData = buildFilteredData(data, boundedFrom, toDate);
+    renderCurrentView();
+    if (dom.optProgress) {
+      dom.optProgress.textContent = `Grafy zobrazují posledních 30 dní (${printDate(boundedFrom)} až ${printDate(toDate)}).`;
+    }
+    return;
+  }
 
   if (isSharingLikePage) {
     if (dom.timeFilterSection) {
@@ -3860,6 +4308,9 @@ function onDataLoaded(data) {
   }
   if (dom.exportBtn) {
     dom.exportBtn.disabled = true;
+  }
+  if (dom.exportReadableBtn) {
+    dom.exportReadableBtn.disabled = true;
   }
 
   if (dom.producerChart) {
@@ -4026,8 +4477,15 @@ async function loadMemberSharingData() {
   }
 
   if (!response.ok) {
+    const errMsg = payload && payload.error ? payload.error : "Nepodarilo se nacist data clena.";
     clearAllDataSections();
-    throw new Error(payload && payload.error ? payload.error : "Nepodarilo se nacist data clena.");
+    if (isSharingLikePage && dom.timeFilterSection) {
+      dom.timeFilterSection.hidden = false;
+    }
+    if (dom.status) {
+      dom.status.textContent = errMsg;
+    }
+    return;
   }
 
   const nextLabels = payload && payload.eanLabels && typeof payload.eanLabels === "object"
@@ -4096,8 +4554,15 @@ async function loadAdminGroupSharingData() {
   }
 
   if (!response.ok) {
+    const errMsg = payload && payload.error ? payload.error : "Nepodařilo se načíst data skupiny sdílení.";
     clearAllDataSections();
-    throw new Error(payload && payload.error ? payload.error : "Nepodařilo se načíst data skupiny sdílení.");
+    if (dom.timeFilterSection) {
+      dom.timeFilterSection.hidden = false;
+    }
+    if (dom.status) {
+      dom.status.textContent = errMsg;
+    }
+    return;
   }
 
   const nextLabels = payload && payload.eanLabels && typeof payload.eanLabels === "object"
@@ -4206,6 +4671,49 @@ if (dom.timeFilterResetBtn) {
   });
 }
 
+if (dom.presetThisMonthBtn) {
+  dom.presetThisMonthBtn.addEventListener("click", () => {
+    if (dom.timePresetSelect) {
+      dom.timePresetSelect.value = "thisMonth";
+    }
+    applyTimePreset("thisMonth");
+  });
+}
+
+if (dom.presetLastMonthBtn) {
+  dom.presetLastMonthBtn.addEventListener("click", () => {
+    if (dom.timePresetSelect) {
+      dom.timePresetSelect.value = "lastMonth";
+    }
+    applyTimePreset("lastMonth");
+  });
+}
+
+if (dom.timePresetApplyBtn) {
+  dom.timePresetApplyBtn.addEventListener("click", () => {
+    const preset = dom.timePresetSelect ? dom.timePresetSelect.value : "thisMonth";
+    if (preset === "custom") {
+      if (isSharingLikePage) {
+        reloadServerDataWithCurrentFilter();
+      } else {
+        applyTimeFilterAndRender();
+      }
+      return;
+    }
+    applyTimePreset(preset);
+  });
+}
+
+if (dom.timePresetSelect) {
+  dom.timePresetSelect.addEventListener("change", () => {
+    const preset = dom.timePresetSelect.value;
+    if (preset === "custom") {
+      return;
+    }
+    applyTimePreset(preset);
+  });
+}
+
 document.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) {
@@ -4217,20 +4725,15 @@ document.addEventListener("input", (event) => {
     if (pageMode === "simulation" && gData) {
       renderAllocationInputs(gData);
       if (gLastResult) {
-        const rounds = Number.parseInt(dom.rounds.value, 10);
-        const { allocations, costs } = readAllocationInputs();
-        const refreshed = simulateSharing(gData, allocations, costs, rounds);
-        refreshed.allocations = allocations.slice();
-        gLastResult = refreshed;
-        renderSimulationResult(gData, refreshed);
-        renderProducerConsumerMatrix(gData, refreshed);
-        renderCharts(gData, refreshed);
+        gLastResult = null;
+        if (dom.exportBtn) { dom.exportBtn.disabled = true; }
+        if (dom.exportReadableBtn) { dom.exportReadableBtn.disabled = true; }
+        if (dom.optProgress) {
+          dom.optProgress.textContent = "Váhy aktualizovány. Pro nové výsledky spusť znovu optimalizaci.";
+        }
       }
     }
     return;
-  }
-  if (target.dataset.kind === "alloc" || target.dataset.kind === "cost") {
-    updateAllocationSum();
   }
 });
 
@@ -4405,82 +4908,197 @@ if (dom.clearProducerFilterBtn) {
   });
 }
 
-if (dom.simulateBtn) {
-  dom.simulateBtn.addEventListener("click", () => {
-  if (!gData) {
+function getSimToken() {
+  return (window.edcAuth && typeof window.edcAuth.getToken === "function"
+    ? window.edcAuth.getToken()
+    : localStorage.getItem("edc_auth_token")) || "";
+}
+
+function getSimGroupContext() {
+  const groupId = (window.edcAuth && typeof window.edcAuth.getSelectedGroupId === "function"
+    ? window.edcAuth.getSelectedGroupId()
+    : "") || "";
+  const tenantId = (window.edcAuth && typeof window.edcAuth.getUser === "function"
+    ? (window.edcAuth.getUser() && window.edcAuth.getUser().tenantId)
+    : null) || "";
+  const dateFrom = gData && gData.dateFrom ? gData.dateFrom.getTime() : 0;
+  const dateTo = gData && gData.dateTo ? gData.dateTo.getTime() : 0;
+  return { groupId, tenantId, dateFrom, dateTo };
+}
+
+function setSimBusyState(busy) {
+  if (dom.simulateBtn) { dom.simulateBtn.disabled = busy; }
+  if (dom.optimizeBtn) { dom.optimizeBtn.disabled = busy; }
+  const bar = document.getElementById("simProgressBar");
+  if (bar) { bar.style.display = busy ? "" : "none"; }
+  if (!busy) {
+    const progressEl = document.getElementById("simProgressValue");
+    const etaEl = document.getElementById("simProgressEta");
+    if (progressEl) { progressEl.value = 0; }
+    if (etaEl) { etaEl.textContent = ""; }
+  }
+}
+
+function updateSimProgressBar(percent, etaSecs, message) {
+  const progressEl = document.getElementById("simProgressValue");
+  const etaEl = document.getElementById("simProgressEta");
+  if (progressEl) { progressEl.value = percent; }
+  if (etaEl) {
+    const etaText = etaSecs != null && etaSecs > 1
+      ? ` | odhad dokončení: ${etaSecs < 60 ? `${Math.round(etaSecs)} s` : `${Math.round(etaSecs / 60)} min`}`
+      : "";
+    etaEl.textContent = (message || "") + etaText;
+  }
+}
+
+async function streamSimulationJob(jobId, token, onProgress, onDone, onError) {
+  const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
+  let resp;
+  try {
+    resp = await fetch(`${apiBase}/admin/simulate/${jobId}/progress`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (err) {
+    onError(`Chyba připojení: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
 
-  try {
-    const rounds = Number.parseInt(dom.rounds.value, 10);
-    const { allocations, costs } = readAllocationInputs();
-    const result = simulateSharing(gData, allocations, costs, rounds);
-    result.allocations = allocations.slice();
-    gLastResult = result;
-    if (dom.optProgress) {
-      dom.optProgress.textContent = `Simulace dokončena | ${result.plan.sourceSummary} | kola: ${result.roundsUsed} | sdíleno: ${result.totalSharing.toFixed(2)} kWh.`;
-    }
-    if (dom.exportBtn) {
-      dom.exportBtn.disabled = false;
-    }
-    renderSimulationResult(gData, result);
-    renderProducerConsumerMatrix(gData, result);
-    renderCharts(gData, result);
-  } catch (err) {
-    if (dom.optProgress) {
-      dom.optProgress.textContent = `Chyba simulace: ${err instanceof Error ? err.message : String(err)}`;
-    }
+  if (!resp.ok) {
+    onError("Nepodařilo se připojit ke streamu průběhu.");
+    return;
   }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { break; }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) { continue; }
+        let evt;
+        try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+        if (evt.type === "progress") { onProgress(evt); }
+        else if (evt.type === "done") { onDone(evt); return; }
+        else if (evt.type === "error") { onError(evt.message || "Chyba simulace."); return; }
+      }
+    }
+  } finally {
+    reader.cancel();
+  }
+}
+
+async function runServerSimulation() {
+  if (!gData) { return; }
+  const token = getSimToken();
+  if (!token) {
+    if (dom.optProgress) { dom.optProgress.textContent = "Pro spuštění simulace se přihlas."; }
+    return;
+  }
+
+  const { groupId, tenantId, dateFrom, dateTo } = getSimGroupContext();
+  const rounds = Number.parseInt(dom.rounds && dom.rounds.value, 10) || 0;
+  const maxFails = Number.parseInt(dom.maxFails && dom.maxFails.value, 10) || 200;
+  const restarts = Number.parseInt(dom.restarts && dom.restarts.value, 10) || 5;
+  const weights = readHistoricalWeightsFromInputs();
+
+  setSimBusyState(true);
+  if (dom.optProgress) {
+    dom.optProgress.textContent = "Spouštím výpočet nejlepší alokace na serveru...";
+  }
+
+  const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
+  let jobId;
+  try {
+    const startResp = await fetch(`${apiBase}/admin/simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        groupId: groupId || null,
+        tenantId: tenantId ? String(tenantId) : null,
+        dateFrom,
+        dateTo,
+        mode: "optimize",
+        rounds,
+        maxFails,
+        restarts,
+        weights,
+      }),
+    });
+    let startPayload = {};
+    try { startPayload = await startResp.json(); } catch { /* noop */ }
+    if (!startResp.ok) {
+      if (dom.optProgress) { dom.optProgress.textContent = `Chyba spuštění: ${startPayload.error || "Neznámá chyba."}`; }
+      setSimBusyState(false);
+      return;
+    }
+    jobId = startPayload.jobId;
+  } catch (err) {
+    if (dom.optProgress) { dom.optProgress.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`; }
+    setSimBusyState(false);
+    return;
+  }
+
+  updateSimProgressBar(0, null, "Optimalizace zahájena...");
+
+  await streamSimulationJob(
+    jobId,
+    token,
+    (evt) => {
+      updateSimProgressBar(evt.percent, evt.etaSecs, evt.message);
+      if (dom.optProgress) { dom.optProgress.textContent = evt.message || ""; }
+    },
+    (evt) => {
+      setSimBusyState(false);
+      const result = evt.result;
+      if (!result) { return; }
+
+      // server nevrací profit — zajisti kompatibilitu s renderSimulationResult
+      if (!Array.isArray(result.profitPerEan)) {
+        result.profitPerEan = Array(result.sharingPerEan.length).fill(0);
+      }
+      if (result.totalProfit == null) { result.totalProfit = 0; }
+
+      gLastResult = result;
+      if (dom.exportBtn) { dom.exportBtn.disabled = false; }
+      if (dom.exportReadableBtn) { dom.exportReadableBtn.disabled = false; }
+
+      const sourceSummary = result.sourceSummary || "";
+      if (dom.optProgress) {
+        dom.optProgress.textContent = `HOTOVO | Nejlepší sdílení: ${result.totalSharing.toFixed(2)} kWh | ${sourceSummary}`;
+      }
+
+      renderSimulationResult(gData, result);
+      renderProducerConsumerMatrix(gData, result);
+      renderCharts(gData, result);
+    },
+    (errMsg) => {
+      setSimBusyState(false);
+      if (dom.optProgress) { dom.optProgress.textContent = `Chyba: ${errMsg}`; }
+    },
+  );
+}
+
+if (dom.simulateBtn) {
+  dom.simulateBtn.addEventListener("click", () => {
+    runServerSimulation().catch((err) => {
+      setSimBusyState(false);
+      if (dom.optProgress) { dom.optProgress.textContent = `Chyba výpočtu: ${err instanceof Error ? err.message : String(err)}`; }
+    });
   });
 }
 
 if (dom.optimizeBtn) {
   dom.optimizeBtn.addEventListener("click", () => {
-  if (!gData) {
-    return;
-  }
-
-  try {
-    const rounds = Number.parseInt(dom.rounds.value, 10);
-    const maxFails = Number.parseInt(dom.maxFails.value, 10);
-    const restarts = Number.parseInt(dom.restarts.value, 10);
-    const { costs } = readAllocationInputs();
-
-    if (dom.optProgress) {
-      dom.optProgress.textContent = "Spouštím optimalizaci...";
-    }
-
-    setTimeout(() => {
-      const result = optimizeAllocations(gData, costs, rounds, maxFails, restarts, (step, total, best) => {
-        if (dom.optProgress) {
-          dom.optProgress.textContent = `Optimalizace ${step}/${total} | Nejlepší sdílení: ${best.totalSharing.toFixed(2)} kWh | Zisk: ${best.totalProfit.toFixed(2)} Kč`;
-        }
-      });
-
-      const inputs = document.querySelectorAll("input[data-kind='alloc']");
-      result.allocations.forEach((v, i) => {
-        if (inputs[i]) {
-          inputs[i].value = v.toFixed(2);
-        }
-      });
-      updateAllocationSum();
-
-      gLastResult = result;
-      if (dom.exportBtn) {
-        dom.exportBtn.disabled = false;
-      }
-      renderSimulationResult(gData, result);
-      renderProducerConsumerMatrix(gData, result);
-      renderCharts(gData, result);
-      if (dom.optProgress) {
-        dom.optProgress.textContent = `HOTOVO | Nejlepší sdílení: ${result.totalSharing.toFixed(2)} kWh | Zisk: ${result.totalProfit.toFixed(2)} Kč | ${result.plan.sourceSummary}`;
-      }
-    }, 20);
-  } catch (err) {
-    if (dom.optProgress) {
-      dom.optProgress.textContent = `Chyba optimalizace: ${err instanceof Error ? err.message : String(err)}`;
-    }
-  }
+    runServerSimulation().catch((err) => {
+      setSimBusyState(false);
+      if (dom.optProgress) { dom.optProgress.textContent = `Chyba optimalizace: ${err instanceof Error ? err.message : String(err)}`; }
+    });
   });
 }
 
@@ -4491,7 +5109,18 @@ if (dom.exportBtn) {
   }
   const content = buildResultCsv(gData, gLastResult);
   const base = gData.filename.replace(/\.csv$/i, "");
-  triggerCsvDownload(`${base}_multi_ean_results.csv`, content);
+  triggerCsvDownload(`${base}_edc_import.csv`, content);
+  });
+}
+
+if (dom.exportReadableBtn) {
+  dom.exportReadableBtn.addEventListener("click", () => {
+    if (!gData || !gLastResult) {
+      return;
+    }
+    const content = buildReadableCsv(gData, gLastResult);
+    const base = gData.filename.replace(/\.csv$/i, "");
+    triggerCsvDownload(`${base}_prehledny.csv`, content);
   });
 }
 
@@ -4542,6 +5171,7 @@ if (isMemberSharingPage) {
 
 if (["sharing", "simulation"].includes(pageMode)) {
   window.addEventListener("edc-auth-state", () => {
+    setupEmbedSnippet();
     gEanLabelMapReady
       .then(() => loadAdminGroupSharingData())
       .catch((err) => {
@@ -4579,6 +5209,16 @@ if (["sharing", "simulation"].includes(pageMode)) {
         }
       });
   };
+}
+
+if (pageMode === "enerkom-report") {
+  gEanLabelMapReady
+    .then(() => loadEmbedTenantData())
+    .catch((err) => {
+      if (dom.status) {
+        dom.status.textContent = `Chyba: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    });
 }
 
 if (isSharingLikePage) {

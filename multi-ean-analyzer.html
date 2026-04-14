@@ -49,7 +49,7 @@
 
       <section class="card controls">
         <div id="fileUploadControls">
-          <div class="control-grid">
+          <div id="csvUploadControls" class="control-grid">
             <label>
               CSV report
               <input id="uploadCsv" type="file" accept=".csv,text/csv" />
@@ -58,6 +58,8 @@
               EAN názvy (vlastní databáze)
               <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
             </label>
+          </div>
+          <div id="simulationSettingsControls" class="control-grid">
             <label>
               Počet kol dle metodiky EDC
               <input id="rounds" type="number" min="1" max="5" value="5" />
@@ -107,7 +109,7 @@
       <section class="card" id="simulationSection" hidden>
         <h2>Simulace a optimalizace</h2>
         <p class="muted">
-          Simulace používá metodiku EDC po prioritách a iteračních kolech. Návrh alokací se při práci se skupinou sdílení opírá o historický tok energie, se zvýšenou vahou stejného měsíce minulého roku.
+          Simulace používá metodiku EDC po prioritách a iteračních kolech. Aplikace sama hledá nejlepší alokace pro maximální sdílení, bez zadávání cen nebo ručních preferencí.
         </p>
 
         <h3>Váhy historického modelu</h3>
@@ -135,14 +137,21 @@
         <div class="table-wrap"><table id="methodologyMatrix"></table></div>
         <div class="table-wrap"><table id="methodologyPriorityMatrix"></table></div>
 
+        <h3>Doporučení nastavení alokací (1-5 výrobců na odběrné místo)</h3>
+        <div class="table-wrap"><table id="consumerProducerRecommendations"></table></div>
+
         <div class="table-wrap"><table id="allocationsTable"></table></div>
 
         <div class="action-row">
-          <button id="simulateBtn" class="btn btn-primary">Simulovat sdílení</button>
-          <button id="optimizeBtn" class="btn btn-secondary">Najít plán s max. sdílením</button>
-          <button id="exportBtn" class="btn btn-ghost" disabled>Export výsledků CSV</button>
+          <button id="simulateBtn" class="btn btn-primary">Najít nejlepší alokace a simulovat</button>
+          <button id="exportBtn" class="btn btn-ghost" disabled>Export EDC CSV</button>
+          <button id="exportReadableBtn" class="btn btn-ghost" disabled>Export přehledný CSV</button>
         </div>
         <p id="optProgress" class="status"></p>
+        <div id="simProgressBar" style="display:none;margin-top:8px;">
+          <progress id="simProgressValue" max="100" value="0" style="width:100%;height:12px;"></progress>
+          <span id="simProgressEta" class="status" style="font-size:0.85em;"></span>
+        </div>
 
         <div class="table-wrap"><table id="simulationResult"></table></div>
         <div class="table-wrap"><table id="producerConsumerMatrix"></table></div>

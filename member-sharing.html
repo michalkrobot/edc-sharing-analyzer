@@ -58,6 +58,28 @@
           <span class="sharing-section-chip">Globální filtr</span>
         </div>
         <p class="section-description">Nastav období od a do. Filtr ovlivní všechny tabulky i grafy na stránce.</p>
+        <div class="time-preset-toolbar" aria-label="Předvolby období">
+          <div class="time-preset-quick">
+            <button id="presetThisMonthBtn" type="button" class="btn btn-ghost">Tento měsíc</button>
+            <button id="presetLastMonthBtn" type="button" class="btn btn-ghost">Minulý měsíc</button>
+          </div>
+          <div class="time-preset-custom">
+            <label class="time-range-field" for="timePresetSelect">
+              Předvolba
+              <select id="timePresetSelect" class="member-filter-select">
+                <option value="thisMonth" selected>Tento měsíc</option>
+                <option value="lastMonth">Minulý měsíc</option>
+                <option value="today">Dnes</option>
+                <option value="yesterday">Včera</option>
+                <option value="last7d">Posledních 7 dní</option>
+                <option value="last30d">Posledních 30 dní</option>
+                <option value="thisYear">Tento rok</option>
+                <option value="custom">Vlastní rozsah</option>
+              </select>
+            </label>
+            <button id="timePresetApplyBtn" type="button" class="btn btn-secondary">Použít předvolbu</button>
+          </div>
+        </div>
         <div class="time-range-filter">
           <label class="time-range-field" for="filterDateFrom">
             Od

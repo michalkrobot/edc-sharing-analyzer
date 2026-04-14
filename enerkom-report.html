@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ENERKOM Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Flex:opsz,wght@6..12,400;6..12,500;6..12,600;6..12,700;6..12,800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="multi-ean-analyzer.css" />
+  </head>
+  <body data-page="enerkom-report">
+    <main class="app-shell embed-shell">
+      <header class="card">
+        <h1>Data o sdílení</h1>
+      </header>
+
+      <section class="card" id="tenantTotalsSection">
+        <div class="sharing-section-head">
+          <h2>Souhrnná data</h2>
+          <span class="sharing-section-chip">Celková čísla</span>
+        </div>
+        <div class="table-wrap">
+          <table class="meta-table" id="tenantTotalsTable">
+            <thead>
+              <tr>
+                <th>Období</th>
+                <th>Vyrobeno</th>
+                <th>Sdíleno</th>
+                <th>Ušetřené CO2</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th>Celkem</th>
+                <td id="tenantTotalProduction">-</td>
+                <td id="tenantTotalSharing">-</td>
+                <td id="tenantTotalCo2Saved">-</td>
+              </tr>
+              <tr>
+                <th>Minulý měsíc</th>
+                <td id="tenantLastMonthProduction">-</td>
+                <td id="tenantLastMonthSharing">-</td>
+                <td id="tenantLastMonthCo2Saved">-</td>
+              </tr>
+              <tr>
+                <th>Tento měsíc</th>
+                <td id="tenantCurrentMonthProduction">-</td>
+                <td id="tenantCurrentMonthSharing">-</td>
+                <td id="tenantCurrentMonthCo2Saved">-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" id="producerDailyTotalsSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Výrobny - Denní souhrn</h2>
+          <span class="sharing-section-chip">Denní sumy</span>
+        </div>
+        <p class="section-description">Sloupcový přehled denních součtů výroby a sdílení.</p>
+        <div id="producerDailyTotalsChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="bestDaySection" hidden>
+        <div class="sharing-section-head">
+          <h2 id="bestDayTitle">Výrobny - Nejlepší den</h2>
+          <span class="sharing-section-chip">Denní maximum</span>
+        </div>
+        <p class="section-description">Den s nejvyšší výrobou a sdílením.</p>
+        <div id="bestDayChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="averageDaySection" hidden>
+        <div class="sharing-section-head">
+          <h2>Výrobny - Průměrný den</h2>
+          <span class="sharing-section-chip">Typický průběh</span>
+        </div>
+        <p class="section-description">Průměr přes všechny dny - výroba a sdílení po 15minutových intervalech.</p>
+        <div id="averageDayChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="consumerDailyTotalsSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Odběry - Denní souhrn</h2>
+          <span class="sharing-section-chip">Denní sumy</span>
+        </div>
+        <p class="section-description">Sloupcový přehled denních součtů spotřeby a sdílení.</p>
+        <div id="consumerDailyTotalsChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="consumerProducerPieChartsSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Odběry - Rozpad sdílení po výrobnách</h2>
+          <span class="sharing-section-chip">Tok sdílení</span>
+        </div>
+        <p class="section-description">Koláčové grafy pro každé odběrné místo ukazují rozdělení přijatého sdílení mezi jednotlivé výrobny.</p>
+        <div id="consumerProducerPieCharts" class="pie-charts-grid"></div>
+      </section>
+
+      <section class="card" id="consumerBestDaySection" hidden>
+        <div class="sharing-section-head">
+          <h2 id="consumerBestDayTitle">Odběry - Nejlepší den</h2>
+          <span class="sharing-section-chip">Denní maximum</span>
+        </div>
+        <p class="section-description">Den s nejvyšší dodávkou ze sdílení.</p>
+        <div id="consumerBestDayChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="consumerAverageDaySection" hidden>
+        <div class="sharing-section-head">
+          <h2>Odběry - Průměrný den</h2>
+          <span class="sharing-section-chip">Typický průběh</span>
+        </div>
+        <p class="section-description">Průměr přes všechny dny - spotřeba a sdílení po 15minutových intervalech.</p>
+        <div id="consumerAverageDayChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <footer class="enerkom-site-footer card">
+        <div class="enerkom-site-footer-meta">
+          <span>© 2026 ENERKOM Horni Pomoravi, z.s.</span>
+        </div>
+      </footer>
+    </main>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script defer src="multi-ean-analyzer.js"></script>
+  </body>
+</html>

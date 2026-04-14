@@ -95,7 +95,6 @@
         href: "multi-ean-analyzer.html",
         label: "Simulace",
         page: "simulation",
-        globalAdminOnly: true,
       },
     ].map((item) => ({
       ...item,
@@ -146,7 +145,6 @@
         href: "multi-ean-analyzer.html",
         label: "Přejít do simulace",
         className: "hero-action hero-action-secondary",
-        globalAdminOnly: true,
       },
     ];
   }
@@ -197,7 +195,6 @@
           "export výsledků do CSV",
         ],
         chip: "pokročilý režim",
-        globalAdminOnly: true,
       },
       {
         href: "member-sharing.html",
@@ -248,7 +245,7 @@
   }
 
   function enforceGlobalAdminSimulationAccess() {
-    if (!isSimulationPage() || isGlobalAdminUser()) {
+    if (!isSimulationPage() || isAdminUser()) {
       return;
     }
     window.location.replace(authUser ? "multi-ean-sharing.html" : "index.html");
@@ -1209,6 +1206,7 @@
     const filterSection = document.getElementById("sharingGroupFilterSection");
     const groupSelect = document.getElementById("sharingGroupSelect");
     const fileUploadControls = document.getElementById("fileUploadControls");
+    const csvUploadControls = document.getElementById("csvUploadControls");
     if (!filterSection || !groupSelect) {
       return;
     }
@@ -1225,10 +1223,16 @@
         groupSelect.appendChild(option);
       }
 
-      if (fileUploadControls) {
+      if (csvUploadControls) {
+        csvUploadControls.hidden = true;
+      } else if (fileUploadControls) {
         fileUploadControls.hidden = true;
       }
       filterSection.hidden = false;
+      const timeFilterSection = document.getElementById("timeFilterSection");
+      if (timeFilterSection) {
+        timeFilterSection.hidden = false;
+      }
 
       if (groups.length === 1) {
         const onlyGroupId = String(groups[0].id);

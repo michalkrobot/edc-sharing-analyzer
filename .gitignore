@@ -2,6 +2,10 @@
 .DS_Store
 Thumbs.db
 
+# Secrets — nikdy necommitovat
+.env
+deploy/secrets.env
+
 # Logs
 *.log
 

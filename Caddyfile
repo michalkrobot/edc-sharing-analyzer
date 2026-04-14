@@ -1,0 +1,10 @@
+{
+    email cert@enerkom-hp.cz
+}
+
+edc-data.enerkom-hp.cz {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
+    reverse_proxy api:8080
+}

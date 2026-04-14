@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Edc.Backend.Api.Features.Simulation;
 using Edc.Backend.Api.Infrastructure.Auth;
 using Edc.Backend.Api.Infrastructure.Csv;
 using Edc.Backend.Api.Infrastructure.Mail;
@@ -36,6 +37,7 @@ public interface IAppService
     Task<object> SaveTenantDefinitionAsync(JsonElement input, CancellationToken cancellationToken = default);
     Task<object> GetMembersAsync(AuthPrincipal auth, string? tenantId, CancellationToken cancellationToken = default);
     Task<List<object>> GetSharingGroupsAsync(AuthPrincipal auth, CancellationToken cancellationToken = default);
+    Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
 }
 
 public sealed class AppService(
@@ -413,48 +415,59 @@ public sealed class AppService(
         if (conn.State != System.Data.ConnectionState.Open)
             await conn.OpenAsync(cancellationToken);
 
+        await using var dropTmp = new NpgsqlCommand("DROP TABLE IF EXISTS tmp_edc_readings;", conn);
+        await dropTmp.ExecuteNonQueryAsync(cancellationToken);
         await using var createTmp = new NpgsqlCommand(
-            @"CREATE TEMP TABLE tmp_edc_readings (LIKE edc_readings INCLUDING DEFAULTS) ON COMMIT DROP;",
+            @"CREATE TEMP TABLE tmp_edc_readings (
+                time_from     timestamptz NOT NULL,
+                time_to       timestamptz NOT NULL,
+                tenant_id     integer     NOT NULL,
+                ean           text        NOT NULL,
+                is_producer   boolean     NOT NULL,
+                kwh_total     float8      NOT NULL,
+                kwh_remainder float8      NOT NULL,
+                kwh_missed    float8      NOT NULL
+            );",
             conn);
         await createTmp.ExecuteNonQueryAsync(cancellationToken);
 
-        await using var importer = await conn.BeginBinaryImportAsync(
+        await using (var importer = await conn.BeginBinaryImportAsync(
             "COPY tmp_edc_readings (time_from, time_to, tenant_id, ean, is_producer, kwh_total, kwh_remainder, kwh_missed) FROM STDIN (FORMAT BINARY)",
-            cancellationToken);
-
-        foreach (var interval in parsed.Intervals)
+            cancellationToken))
         {
-            var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(interval.Start);
-            var tsTo   = DateTimeOffset.FromUnixTimeMilliseconds(interval.End);
-            for (var i = 0; i < parsed.Producers.Count; i++)
+            foreach (var interval in parsed.Intervals)
             {
-                var p = interval.Producers[i];
-                await importer.StartRowAsync(cancellationToken);
-                await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
-                await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
-                await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
-                await importer.WriteAsync(parsed.Producers[i].Name, NpgsqlDbType.Text, cancellationToken);
-                await importer.WriteAsync(true, NpgsqlDbType.Boolean, cancellationToken);
-                await importer.WriteAsync(p.Before, NpgsqlDbType.Double, cancellationToken);
-                await importer.WriteAsync(p.After, NpgsqlDbType.Double, cancellationToken);
-                await importer.WriteAsync(p.Missed, NpgsqlDbType.Double, cancellationToken);
+                var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(interval.Start);
+                var tsTo   = DateTimeOffset.FromUnixTimeMilliseconds(interval.End);
+                for (var i = 0; i < parsed.Producers.Count; i++)
+                {
+                    var p = interval.Producers[i];
+                    await importer.StartRowAsync(cancellationToken);
+                    await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
+                    await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
+                    await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
+                    await importer.WriteAsync(parsed.Producers[i].Name, NpgsqlDbType.Text, cancellationToken);
+                    await importer.WriteAsync(true, NpgsqlDbType.Boolean, cancellationToken);
+                    await importer.WriteAsync(p.Before, NpgsqlDbType.Double, cancellationToken);
+                    await importer.WriteAsync(p.After, NpgsqlDbType.Double, cancellationToken);
+                    await importer.WriteAsync(p.Missed, NpgsqlDbType.Double, cancellationToken);
+                }
+                for (var i = 0; i < parsed.Consumers.Count; i++)
+                {
+                    var c = interval.Consumers[i];
+                    await importer.StartRowAsync(cancellationToken);
+                    await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
+                    await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
+                    await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
+                    await importer.WriteAsync(parsed.Consumers[i].Name, NpgsqlDbType.Text, cancellationToken);
+                    await importer.WriteAsync(false, NpgsqlDbType.Boolean, cancellationToken);
+                    await importer.WriteAsync(c.Before, NpgsqlDbType.Double, cancellationToken);
+                    await importer.WriteAsync(c.After, NpgsqlDbType.Double, cancellationToken);
+                    await importer.WriteAsync(c.Missed, NpgsqlDbType.Double, cancellationToken);
+                }
             }
-            for (var i = 0; i < parsed.Consumers.Count; i++)
-            {
-                var c = interval.Consumers[i];
-                await importer.StartRowAsync(cancellationToken);
-                await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
-                await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
-                await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
-                await importer.WriteAsync(parsed.Consumers[i].Name, NpgsqlDbType.Text, cancellationToken);
-                await importer.WriteAsync(false, NpgsqlDbType.Boolean, cancellationToken);
-                await importer.WriteAsync(c.Before, NpgsqlDbType.Double, cancellationToken);
-                await importer.WriteAsync(c.After, NpgsqlDbType.Double, cancellationToken);
-                await importer.WriteAsync(c.Missed, NpgsqlDbType.Double, cancellationToken);
-            }
+            await importer.CompleteAsync(cancellationToken);
         }
-
-        await importer.CompleteAsync(cancellationToken);
 
         await using var upsertCmd = new NpgsqlCommand(
             @"INSERT INTO edc_readings (time_from, time_to, tenant_id, ean, is_producer, kwh_total, kwh_remainder, kwh_missed)
@@ -525,33 +538,42 @@ public sealed class AppService(
         if (conn.State != System.Data.ConnectionState.Open)
             await conn.OpenAsync(cancellationToken);
 
+        await using var dropTmp = new NpgsqlCommand("DROP TABLE IF EXISTS tmp_edc_link_readings;", conn);
+        await dropTmp.ExecuteNonQueryAsync(cancellationToken);
         await using var createTmp = new NpgsqlCommand(
-            @"CREATE TEMP TABLE tmp_edc_link_readings (LIKE edc_link_readings INCLUDING DEFAULTS) ON COMMIT DROP;",
+            @"CREATE TEMP TABLE tmp_edc_link_readings (
+                time_from    timestamptz NOT NULL,
+                time_to      timestamptz NOT NULL,
+                tenant_id    integer     NOT NULL,
+                producer_ean text        NOT NULL,
+                consumer_ean text        NOT NULL,
+                kwh_shared   float8      NOT NULL
+            );",
             conn);
         await createTmp.ExecuteNonQueryAsync(cancellationToken);
 
-        await using var importer = await conn.BeginBinaryImportAsync(
+        await using (var importer = await conn.BeginBinaryImportAsync(
             "COPY tmp_edc_link_readings (time_from, time_to, tenant_id, producer_ean, consumer_ean, kwh_shared) FROM STDIN (FORMAT BINARY)",
-            cancellationToken);
-
-        foreach (var interval in parsed.Intervals)
+            cancellationToken))
         {
-            var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(interval.Start);
-            var tsTo   = DateTimeOffset.FromUnixTimeMilliseconds(interval.End);
-            foreach (var link in interval.Links)
+            foreach (var interval in parsed.Intervals)
             {
-                if (link.Shared <= 0) continue;
-                await importer.StartRowAsync(cancellationToken);
-                await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
-                await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
-                await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
-                await importer.WriteAsync(link.ProducerEan, NpgsqlDbType.Text, cancellationToken);
-                await importer.WriteAsync(link.ConsumerEan, NpgsqlDbType.Text, cancellationToken);
-                await importer.WriteAsync(link.Shared, NpgsqlDbType.Double, cancellationToken);
+                var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(interval.Start);
+                var tsTo   = DateTimeOffset.FromUnixTimeMilliseconds(interval.End);
+                foreach (var link in interval.Links)
+                {
+                    if (link.Shared <= 0) continue;
+                    await importer.StartRowAsync(cancellationToken);
+                    await importer.WriteAsync(tsFrom, NpgsqlDbType.TimestampTz, cancellationToken);
+                    await importer.WriteAsync(tsTo,   NpgsqlDbType.TimestampTz, cancellationToken);
+                    await importer.WriteAsync(tenantId, NpgsqlDbType.Integer, cancellationToken);
+                    await importer.WriteAsync(link.ProducerEan, NpgsqlDbType.Text, cancellationToken);
+                    await importer.WriteAsync(link.ConsumerEan, NpgsqlDbType.Text, cancellationToken);
+                    await importer.WriteAsync(link.Shared, NpgsqlDbType.Double, cancellationToken);
+                }
             }
+            await importer.CompleteAsync(cancellationToken);
         }
-
-        await importer.CompleteAsync(cancellationToken);
 
         await using var upsertCmd = new NpgsqlCommand(
             @"INSERT INTO edc_link_readings (time_from, time_to, tenant_id, producer_ean, consumer_ean, kwh_shared)
@@ -868,6 +890,78 @@ public sealed class AppService(
             eanLabels,
             memberScope = (object?)null,
         };
+    }
+
+    public async Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default)
+    {
+        var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(dateFrom);
+        var tsTo = DateTimeOffset.FromUnixTimeMilliseconds(dateTo);
+
+        var readings = await db.EdcReadings
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.TimeFrom >= tsFrom && x.TimeFrom < tsTo)
+            .OrderBy(x => x.TimeFrom).ThenBy(x => x.Ean)
+            .ToListAsync(cancellationToken);
+
+        if (readings.Count == 0)
+            throw new InvalidOperationException("Pro tuto skupinu sdílení nejsou v daném období EDC data.");
+
+        var cs = StringComparer.Create(new CultureInfo("cs-CZ"), false);
+        var producerEans = readings.Where(x => x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+        var consumerEans = readings.Where(x => !x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+
+        if (producerEans.Count == 0 || consumerEans.Count == 0)
+            throw new InvalidOperationException("Pro tuto skupinu sdílení nejsou v daném období EDC data.");
+
+        var producerIndexByEan = producerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
+        var consumerIndexByEan = consumerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
+
+        var linkReadings = await db.EdcLinkReadings
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.TimeFrom >= tsFrom && x.TimeFrom < tsTo)
+            .ToListAsync(cancellationToken);
+
+        var linksByTime = linkReadings.GroupBy(x => x.TimeFrom).ToDictionary(x => x.Key, x => x.ToList());
+        var hasExactAllocations = linkReadings.Count > 0;
+
+        var intervals = readings
+            .GroupBy(x => x.TimeFrom)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var producerData = producerEans.Select(ean =>
+                {
+                    var r = g.FirstOrDefault(x => x.Ean == ean && x.IsProducer);
+                    return r is null ? new SimEanData(0d, 0d) : new SimEanData(r.KwhTotal, r.KwhRemainder);
+                }).ToList();
+
+                var consumerData = consumerEans.Select(ean =>
+                {
+                    var r = g.FirstOrDefault(x => x.Ean == ean && !x.IsProducer);
+                    return r is null ? new SimEanData(0d, 0d) : new SimEanData(r.KwhTotal, r.KwhRemainder);
+                }).ToList();
+
+                List<List<double>>? exactAllocations = null;
+                if (linksByTime.TryGetValue(g.Key, out var links))
+                {
+                    var matrix = producerEans.Select(_ => consumerEans.Select(_ => 0d).ToList()).ToList();
+                    var anyLink = false;
+                    foreach (var lnk in links)
+                    {
+                        if (producerIndexByEan.TryGetValue(lnk.ProducerEan, out var pi)
+                            && consumerIndexByEan.TryGetValue(lnk.ConsumerEan, out var ci))
+                        {
+                            matrix[pi][ci] += Math.Max(0, lnk.KwhShared);
+                            anyLink = true;
+                        }
+                    }
+                    if (anyLink) exactAllocations = matrix;
+                }
+
+                return new SimInterval(g.Key.ToUnixTimeMilliseconds(), producerData, consumerData, exactAllocations);
+            }).ToList();
+
+        return new SimData(producerEans, consumerEans, intervals, hasExactAllocations);
     }
 
     public async Task<object> ResolveTenantScopeAsync(AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default)

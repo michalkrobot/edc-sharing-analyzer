@@ -1,6 +1,8 @@
 using Edc.Backend.Api.Features.Admin;
 using Edc.Backend.Api.Features.Auth;
 using Edc.Backend.Api.Features.Member;
+using Edc.Backend.Api.Features.Shared;
+using Edc.Backend.Api.Features.Simulation;
 using Edc.Backend.Api.Infrastructure.Auth;
 using Edc.Backend.Api.Infrastructure.Csv;
 using Edc.Backend.Api.Infrastructure.Mail;
@@ -24,6 +26,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 });
 
 builder.Services.AddSingleton<ICsvParser, CsvParser>();
+builder.Services.AddSingleton<SimulationService>();
 builder.Services.AddScoped<IAppService, AppService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 
@@ -121,6 +124,8 @@ app.MapGet("/health", () =>
 app.MapAuthEndpoints();
 app.MapMemberEndpoints();
 app.MapAdminEndpoints();
+app.MapPublicEndpoints();
+app.MapSimulationEndpoints();
 app.MapFallbackToFile("index.html");
 
 var portRaw = Environment.GetEnvironmentVariable("PORT");
