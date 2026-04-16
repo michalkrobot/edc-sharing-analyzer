@@ -63,6 +63,16 @@ body {
 
 body[data-page="enerkom-report"] {
   background: #f4f7f2;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+body[data-page="enerkom-report"][data-embedded="true"] header.card {
+  display: none;
+}
+
+body[data-page="enerkom-report"]::-webkit-scrollbar {
+  display: none;
 }
 
 body[data-page="enerkom-report"] .bg-shape {

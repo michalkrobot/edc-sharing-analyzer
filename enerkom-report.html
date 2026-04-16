@@ -16,7 +16,7 @@
     />
     <link rel="stylesheet" href="multi-ean-analyzer.css" />
   </head>
-  <body data-page="enerkom-report">
+  <body data-page="enerkom-report" data-embedded="false">
     <main class="app-shell embed-shell">
       <header class="card">
         <h1>Data o sdílení</h1>
@@ -131,6 +131,7 @@
       </footer>
     </main>
 
+    <script>if (window !== window.top) document.body.dataset.embedded = "true";</script>
     <script defer src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <script defer src="multi-ean-analyzer.js"></script>
   </body>
