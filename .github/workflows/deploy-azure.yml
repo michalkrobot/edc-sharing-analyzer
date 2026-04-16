@@ -36,7 +36,9 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -51,4 +53,5 @@ jobs:
           az containerapp update \
             --name "$CONTAINERAPP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
-            --image "ghcr.io/${{ github.repository }}:latest"
+            --image "ghcr.io/${{ github.repository }}:${{ github.sha }}" \
+            --revision-suffix "sha-${GITHUB_SHA::7}"
