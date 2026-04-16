@@ -65,7 +65,13 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        ctx.Context.Response.Headers.CacheControl = "no-cache, must-revalidate";
+    }
+});
 app.UseCors();
 
 app.Use(async (context, next) =>
