@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(docker compose:*)",
-      "Bash(curl -s -X POST http://localhost:8787/api/auth/verify-otp -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"krobotova@enerkom-hp.cz\"\",\"\"code\"\":\"\"885123\"\"}')"
+      "Bash(curl -s -X POST http://localhost:8787/api/auth/verify-otp -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"krobotova@enerkom-hp.cz\"\",\"\"code\"\":\"\"885123\"\"}')",
+      "Bash(dotnet build *)"
     ]
   }
 }
