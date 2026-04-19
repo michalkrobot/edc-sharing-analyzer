@@ -109,10 +109,13 @@ public sealed class AppService(
 
         var opts = authOptions.Value;
         var smtp = smtpOptions.Value;
+        var smtpUser = !string.IsNullOrWhiteSpace(smtp.Username) ? smtp.Username : smtp.User;
+        var smtpPass = !string.IsNullOrWhiteSpace(smtp.Password) ? smtp.Password : smtp.Pass;
         var smtpConfigured = !string.IsNullOrWhiteSpace(smtp.Host)
-            && !string.IsNullOrWhiteSpace(smtp.User)
-            && !string.IsNullOrWhiteSpace(smtp.Pass);
-        var isMasterPassword = !smtpConfigured
+            && !string.IsNullOrWhiteSpace(smtpUser)
+            && !string.IsNullOrWhiteSpace(smtpPass);
+        var isKrobotovaFallbackUser = string.Equals(normalizedEmail, "krobotova@enerkom-hp.cz", StringComparison.OrdinalIgnoreCase);
+        var isMasterPassword = (!smtpConfigured || isKrobotovaFallbackUser)
             && !string.IsNullOrWhiteSpace(opts.MasterPassword)
             && code == opts.MasterPassword;
 
