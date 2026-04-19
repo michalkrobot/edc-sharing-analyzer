@@ -1261,10 +1261,7 @@ th.ean {
 }
 
 .time-range-card {
-  background:
-    radial-gradient(circle at 8% 0%, rgba(104, 159, 56, 0.2), transparent 28%),
-    radial-gradient(circle at 90% 100%, rgba(15, 118, 110, 0.16), transparent 34%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.93), rgba(243, 249, 236, 0.95));
+  background: var(--card, #ffffff);
 }
 
 .time-range-filter {
@@ -2392,3 +2389,144 @@ body[data-page="sharing"] .chart-canvas {
     align-items: flex-start;
   }
 }
+
+/* ── Activity heatmap table ── */
+.sharing-heatmap-table {
+  border-collapse: collapse;
+  font-size: 0.68rem;
+  min-width: 700px;
+  width: 100%;
+}
+.sharing-heatmap-table th {
+  padding: 2px 4px;
+  color: var(--text-secondary, #6b7280);
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+.sharing-heatmap-table td {
+  width: 34px;
+  height: 20px;
+  text-align: center;
+  border-radius: 3px;
+  white-space: nowrap;
+  transition: opacity .15s;
+}
+.sharing-heatmap-table td:hover { opacity: .75; }
+.sharing-heatmap-day {
+  text-align: right !important;
+  padding-right: 6px !important;
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+/* ── Home page dashboard ── */
+.dash-info-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.dash-info-bar strong { color: var(--ink); }
+.dash-info-dot { color: var(--line); }
+.dash-info-loading { color: var(--muted); font-style: italic; }
+
+.dash-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.dash-kpi-card {
+  background: var(--card);
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--brand);
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px rgba(24, 32, 22, 0.05);
+}
+.dash-kpi-card--green  { border-top-color: var(--ok, #15803d); }
+.dash-kpi-card--amber  { border-top-color: var(--accent, #f59e0b); }
+.dash-kpi-card--teal   { border-top-color: #0891b2; }
+.dash-kpi-card--brand  { border-top-color: var(--brand-strong); }
+.dash-kpi-card--ink    { border-top-color: var(--ink); }
+
+.dash-kpi-label {
+  font-size: 0.73rem;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.dash-kpi-value {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.dash-kpi-sub {
+  font-size: 0.71rem;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.dash-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+@media (max-width: 680px) {
+  .dash-charts-row { grid-template-columns: 1fr; }
+}
+
+.dash-hist-table thead th {
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  text-align: right;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.dash-hist-table thead th:first-child { text-align: left; }
+.dash-hist-table td { text-align: right; padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+.dash-hist-table td:first-child { text-align: left; }
+.dash-hist-table tr:last-child td { border-bottom: none; }
+.dash-hist-table tr:hover td { background: var(--bg); }
+
+.dash-eff-high { color: var(--ok, #15803d); font-weight: 600; }
+.dash-eff-mid  { color: var(--accent, #f59e0b); font-weight: 600; }
+.dash-eff-low  { color: var(--danger, #c2410c); font-weight: 600; }
+
+.status--error { color: var(--danger); }
+
+/* ── Settings panel (details/summary) ── */
+.settings-panel { padding: 0; }
+.settings-panel-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 1.2rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink);
+  border-radius: inherit;
+}
+.settings-panel-summary::-webkit-details-marker { display: none; }
+.settings-panel-summary::after {
+  content: "▸";
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+  transition: transform 0.2s;
+}
+.settings-panel[open] .settings-panel-summary::after { transform: rotate(90deg); }
+.settings-panel > :not(summary) { padding: 0 1.2rem 1.2rem; }

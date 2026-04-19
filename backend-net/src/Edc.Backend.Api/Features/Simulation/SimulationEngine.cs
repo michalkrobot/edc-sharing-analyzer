@@ -299,6 +299,8 @@ public static class SimulationEngine
         var producerToConsumer = Enumerable.Range(0, pCount).Select(_ => new double[cCount]).ToArray();
         var perRoundPerEan = Enumerable.Range(0, roundsUsed).Select(_ => new double[cCount]).ToArray();
         var intervalTotals = new List<IntervalTotal>();
+        var simulatedProductionPerProducer = new double[pCount];
+        var simulatedConsumptionPerConsumer = new double[cCount];
 
         foreach (var interval in data.Intervals)
         {
@@ -306,6 +308,11 @@ public static class SimulationEngine
             var consumerRemaining = interval.Consumers.Select(c => ToCentiKwh(c.Before)).ToArray();
             var intervalProduction = producerRemaining.Sum() / 100.0;
             var intervalConsumption = consumerRemaining.Sum() / 100.0;
+
+            for (int pi = 0; pi < pCount; pi++)
+                simulatedProductionPerProducer[pi] += interval.Producers[pi].Before;
+            for (int ci = 0; ci < cCount; ci++)
+                simulatedConsumptionPerConsumer[ci] += interval.Consumers[ci].Before;
             double intervalShared = 0;
 
             for (int round = 0; round < roundsUsed; round++)
@@ -373,7 +380,13 @@ public static class SimulationEngine
             IntervalTotals: intervalTotals,
             TotalSharing: sharingPerConsumer.Sum(),
             RoundsUsed: roundsUsed,
-            SourceSummary: plan.SourceSummary);
+            SourceSummary: plan.SourceSummary,
+            ProducerEans: data.ProducerNames,
+            ConsumerEans: data.ConsumerNames,
+            SimulatedProductionPerProducer: [.. simulatedProductionPerProducer],
+            SimulatedConsumptionPerConsumer: [.. simulatedConsumptionPerConsumer],
+            HistoricalProductionPerProducer: data.HistoricalProductionPerProducer ?? Enumerable.Repeat(0d, pCount).ToList(),
+            HistoricalConsumptionPerConsumer: data.HistoricalConsumptionPerConsumer ?? Enumerable.Repeat(0d, cCount).ToList());
     }
 
     public static SimulationResult SimulateSharing(SimData data, double[][] allocationMatrix, int rounds, HistoricalWeights weights, string? sourceSummary = null)
@@ -382,41 +395,152 @@ public static class SimulationEngine
         return SimulateSharingWithPlan(data, plan, rounds);
     }
 
-    private static double SimulateFastTotalSharing(SimData data, double[][] allocationMatrix, int rounds, HistoricalWeights weights, string? sourceSummary = null)
+    // Lightweight scoring-only simulation — no result object, no extra arrays.
+    // Uses pre-built prioritiesByConsumer so the historical model is not rebuilt per candidate.
+    private static double SimulateForScore(SimData data, double[][] matrix, int[][] prioritiesByConsumer, int roundsUsed)
     {
-        var result = SimulateSharing(data, allocationMatrix, rounds, weights, sourceSummary);
-        return result.TotalSharing;
+        int pCount = data.ProducerNames.Count;
+        int cCount = data.ConsumerNames.Count;
+        double totalSharing = 0;
+
+        var producerRemaining = new long[pCount];
+        var consumerRemaining = new long[cCount];
+        var producerBeforeRound = new long[pCount];
+        var producerSharedThisRound = new long[pCount];
+
+        foreach (var interval in data.Intervals)
+        {
+            long producerTotal = 0;
+            for (int pi = 0; pi < pCount; pi++)
+            {
+                producerRemaining[pi] = ToCentiKwh(interval.Producers[pi].Before);
+                producerTotal += producerRemaining[pi];
+            }
+            for (int ci = 0; ci < cCount; ci++)
+                consumerRemaining[ci] = ToCentiKwh(interval.Consumers[ci].Before);
+
+            for (int round = 0; round < roundsUsed && producerTotal > 0; round++)
+            {
+                Array.Copy(producerRemaining, producerBeforeRound, pCount);
+                Array.Clear(producerSharedThisRound, 0, pCount);
+                long sharedThisRound = 0;
+
+                for (int priorityIndex = 0; priorityIndex < MaxPriorityLinks; priorityIndex++)
+                {
+                    for (int ci = 0; ci < cCount; ci++)
+                    {
+                        if (consumerRemaining[ci] <= 0) continue;
+                        var priorities = prioritiesByConsumer[ci];
+                        if (priorities is null || priorityIndex >= priorities.Length) continue;
+                        var pi = priorities[priorityIndex];
+                        if (pi < 0 || pi >= pCount) continue;
+                        var alloc = matrix[pi][ci];
+                        if (alloc <= 0) continue;
+                        var quota = (long)((producerBeforeRound[pi] * alloc) / 100);
+                        var available = producerRemaining[pi] - producerSharedThisRound[pi];
+                        var shared = Math.Min(consumerRemaining[ci], Math.Min(quota, available));
+                        if (shared <= 0) continue;
+                        consumerRemaining[ci] -= shared;
+                        producerSharedThisRound[pi] += shared;
+                        sharedThisRound += shared;
+                    }
+                }
+
+                for (int pi = 0; pi < pCount; pi++)
+                {
+                    var taken = Math.Min(producerRemaining[pi], producerSharedThisRound[pi]);
+                    producerRemaining[pi] -= taken;
+                    producerTotal -= taken;
+                }
+
+                totalSharing += FromCentiKwh(sharedThisRound);
+                if (sharedThisRound <= 0) break;
+            }
+        }
+        return totalSharing;
     }
 
     private static double[][] CloneMatrix(double[][] matrix) =>
         matrix.Select(row => row.ToArray()).ToArray();
 
-    private static bool[][] BuildAllowedMatrix(int producerCount, int consumerCount, int[][] prioritiesByConsumer, double[][] weightedPairShared)
+    private static (bool[][] Allowed, bool[][] Forced) BuildAllowedAndForcedMatrix(
+        int producerCount, int consumerCount,
+        int[][] prioritiesByConsumer, double[][] weightedPairShared,
+        List<(int ProducerIndex, int ConsumerIndex)>? manualLinks)
     {
-        var allowed = Enumerable.Range(0, producerCount)
-            .Select(_ => new bool[consumerCount])
-            .ToArray();
+        var allowed = Enumerable.Range(0, producerCount).Select(_ => new bool[consumerCount]).ToArray();
+        var forced = Enumerable.Range(0, producerCount).Select(_ => new bool[consumerCount]).ToArray();
+        var manualCountPerConsumer = new int[consumerCount];
 
+        // 1. Mandatory manual links
+        if (manualLinks is not null)
+        {
+            foreach (var (pi, ci) in manualLinks)
+            {
+                if (pi < 0 || pi >= producerCount || ci < 0 || ci >= consumerCount) continue;
+                allowed[pi][ci] = true;
+                forced[pi][ci] = true;
+                manualCountPerConsumer[ci]++;
+            }
+        }
+
+        // 2. Fill remaining slots from historical priorities
         for (int ci = 0; ci < consumerCount; ci++)
         {
+            var remaining = MaxPriorityLinks - manualCountPerConsumer[ci];
+            if (remaining <= 0) continue;
+
             var priorities = ci < prioritiesByConsumer.Length ? prioritiesByConsumer[ci] : Array.Empty<int>();
-            foreach (var pi in priorities.Take(MaxPriorityLinks))
+            var added = 0;
+            foreach (var pi in priorities)
             {
-                if (pi >= 0 && pi < producerCount)
+                if (added >= remaining) break;
+                if (pi >= 0 && pi < producerCount && !allowed[pi][ci])
+                {
                     allowed[pi][ci] = true;
+                    added++;
+                }
             }
 
             if (!allowed.Any(row => row[ci]))
             {
-                var fallbackProducer = Enumerable.Range(0, producerCount)
+                var fallback = Enumerable.Range(0, producerCount)
                     .OrderByDescending(pi => weightedPairShared[pi][ci])
                     .FirstOrDefault();
-                if (fallbackProducer >= 0 && fallbackProducer < producerCount)
-                    allowed[fallbackProducer][ci] = true;
+                if (fallback >= 0 && fallback < producerCount)
+                    allowed[fallback][ci] = true;
             }
         }
 
-        return allowed;
+        return (allowed, forced);
+    }
+
+    private static void EnsureForcedMinimumAllocation(double[][] matrix, bool[][] forced, double minPercent = 1.0)
+    {
+        for (int pi = 0; pi < matrix.Length; pi++)
+        {
+            for (int ci = 0; ci < matrix[pi].Length; ci++)
+            {
+                if (!forced[pi][ci] || matrix[pi][ci] >= minPercent - 1e-9) continue;
+
+                var needed = minPercent - matrix[pi][ci];
+                matrix[pi][ci] = minPercent;
+
+                var donors = Enumerable.Range(0, matrix[pi].Length)
+                    .Where(idx => idx != ci && !forced[pi][idx] && matrix[pi][idx] > 0.001)
+                    .OrderByDescending(idx => matrix[pi][idx])
+                    .ToArray();
+
+                foreach (var donor in donors)
+                {
+                    if (needed <= 1e-9) break;
+                    var take = Math.Min(matrix[pi][donor], needed);
+                    matrix[pi][donor] -= take;
+                    needed -= take;
+                }
+            }
+            matrix[pi] = NormalizePercentRow(matrix[pi]);
+        }
     }
 
     private static double[] ScaleRowToHundred(double[] row)
@@ -534,7 +658,9 @@ public static class SimulationEngine
             matrix[pi] = NormalizePercentRow(matrix[pi]);
     }
 
-    private static void MutateAllocationMatrix(double[][] matrix, bool[][] allowed, Random rng)
+    private const double ForcedMinPercent = 1.0;
+
+    private static void MutateAllocationMatrix(double[][] matrix, bool[][] allowed, bool[][] forced, Random rng)
     {
         if (matrix.Length == 0 || matrix[0].Length < 2)
             return;
@@ -556,7 +682,15 @@ public static class SimulationEngine
             if (fromIdx == toIdx)
                 continue;
 
-            var movable = Math.Min(row[fromIdx], rng.NextDouble() * 6.0);
+            // Don't reduce forced links below minimum
+            if (forced[pi][fromIdx] && row[fromIdx] <= ForcedMinPercent + 1e-9)
+                continue;
+
+            var maxTake = forced[pi][fromIdx]
+                ? Math.Max(0, row[fromIdx] - ForcedMinPercent)
+                : row[fromIdx];
+
+            var movable = Math.Min(maxTake, rng.NextDouble() * 6.0);
             if (movable <= 1e-9)
                 continue;
 
@@ -575,55 +709,66 @@ public static class SimulationEngine
         HistoricalWeights weights,
         Action<int, int, SimulationResult> progress)
     {
-        var rng = new Random();
         var producerCount = data.ProducerNames.Count;
         var consumerCount = data.ConsumerNames.Count;
         var model = BuildHistoricalSharingModel(data, weights);
-        var allowed = BuildAllowedMatrix(producerCount, consumerCount, model.PrioritiesByConsumer, model.WeightedPairShared);
+        var (allowed, forced) = BuildAllowedAndForcedMatrix(producerCount, consumerCount, model.PrioritiesByConsumer, model.WeightedPairShared, data.ManualPriorityLinks);
+        var roundsUsed = ResolveMethodologyRounds(data, rounds);
 
+        double bestScore = double.MinValue;
         SimulationResult? bestOverall = null;
+        var syncLock = new object();
+        var completedRestarts = 0;
 
-        for (int restart = 1; restart <= restarts; restart++)
-        {
-            var current = BuildInitialAllocationMatrix(model, allowed);
-            EnsureConsumerMinimumCoverage(current, allowed, MinConsumerAllocationPercent);
-            var currentScore = SimulateFastTotalSharing(data, current, rounds, weights, model.SourceSummary);
-            var bestLocal = CloneMatrix(current);
-            var bestLocalScore = currentScore;
-
-            int fails = 0;
-            while (fails < maxFails)
+        Parallel.For(0, restarts, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+            _ =>
             {
-                var candidate = CloneMatrix(current);
-                MutateAllocationMatrix(candidate, allowed, rng);
-                EnsureConsumerMinimumCoverage(candidate, allowed, MinConsumerAllocationPercent);
-                ValidateProducerAllocationMatrix(candidate);
+                var rng = new Random();
+                var current = BuildInitialAllocationMatrix(model, allowed);
+                EnsureConsumerMinimumCoverage(current, allowed, MinConsumerAllocationPercent);
+                EnsureForcedMinimumAllocation(current, forced);
+                var currentScore = SimulateForScore(data, current, model.PrioritiesByConsumer, roundsUsed);
+                var localBest = CloneMatrix(current);
+                var localBestScore = currentScore;
 
-                var candidateScore = SimulateFastTotalSharing(data, candidate, rounds, weights, model.SourceSummary);
-                if (candidateScore > currentScore)
+                int fails = 0;
+                while (fails < maxFails)
                 {
-                    current = candidate;
-                    currentScore = candidateScore;
-                    fails = 0;
-                    if (candidateScore > bestLocalScore)
+                    var candidate = CloneMatrix(current);
+                    MutateAllocationMatrix(candidate, allowed, forced, rng);
+                    EnsureConsumerMinimumCoverage(candidate, allowed, MinConsumerAllocationPercent);
+                    EnsureForcedMinimumAllocation(candidate, forced);
+                    ValidateProducerAllocationMatrix(candidate);
+
+                    var candidateScore = SimulateForScore(data, candidate, model.PrioritiesByConsumer, roundsUsed);
+                    if (candidateScore > currentScore)
                     {
-                        bestLocal = CloneMatrix(candidate);
-                        bestLocalScore = candidateScore;
+                        current = candidate;
+                        currentScore = candidateScore;
+                        fails = 0;
+                        if (candidateScore > localBestScore)
+                        {
+                            localBest = CloneMatrix(candidate);
+                            localBestScore = candidateScore;
+                        }
+                    }
+                    else
+                    {
+                        fails++;
                     }
                 }
-                else
+
+                lock (syncLock)
                 {
-                    fails++;
+                    var done = ++completedRestarts;
+                    if (localBestScore > bestScore || bestOverall is null)
+                    {
+                        bestScore = localBestScore;
+                        bestOverall = SimulateSharing(data, localBest, rounds, weights, model.SourceSummary);
+                    }
+                    progress(done, restarts, bestOverall!);
                 }
-            }
-
-            if (bestOverall is null || bestLocalScore > bestOverall.TotalSharing)
-            {
-                bestOverall = SimulateSharing(data, bestLocal, rounds, weights, model.SourceSummary);
-            }
-
-            progress(restart, restarts, bestOverall);
-        }
+            });
 
         return bestOverall!;
     }

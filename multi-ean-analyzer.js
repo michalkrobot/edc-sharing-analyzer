@@ -611,7 +611,8 @@ function ensureAllocationSourceSection() {
   section.id = "allocationSourceSection";
   section.className = "card allocation-source-card";
   section.hidden = true;
-  section.innerHTML = "<div class='allocation-source-head'><h2>Zdroj toku sdílení</h2><span id='allocationSourceBadge' class='allocation-source-badge'></span></div><p id='allocationSourceText' class='allocation-source-text'></p>";
+  //section.innerHTML = "<div class='allocation-source-head'><h2>Zdroj toku sdílení</h2><span id='allocationSourceBadge' class='allocation-source-badge'></span></div><p id='allocationSourceText' class='allocation-source-text'></p>";
+  section.innerHTML = "";
   appShell.insertBefore(section, summarySection);
   return section;
 }
@@ -2516,6 +2517,22 @@ function computeConsumerProducerAllocations(data) {
     producerAllocations: data.producers.map((producer) => ({ name: producer.name, shared: 0 })),
   }));
 
+  const shouldUseExactAllocations = getAllocationModeInfo(data).effectiveMode === "exact";
+
+  if (shouldUseExactAllocations) {
+    // Transpose the exact allocation matrix: exactAllocations[pi][ci] → result[ci].producerAllocations[pi]
+    for (const interval of data.intervals) {
+      if (!Array.isArray(interval.exactAllocations)) continue;
+      for (let pi = 0; pi < interval.exactAllocations.length; pi += 1) {
+        const row = Array.isArray(interval.exactAllocations[pi]) ? interval.exactAllocations[pi] : [];
+        for (let ci = 0; ci < row.length; ci += 1) {
+          result[ci].producerAllocations[pi].shared += Number(row[ci]) || 0;
+        }
+      }
+    }
+    return result;
+  }
+
   for (const interval of data.intervals) {
     const totalConsumerReceived = interval.consumers.reduce(
       (sumValue, consumer) => sumValue + Math.max(0, consumer.before - consumer.after),
@@ -2579,6 +2596,7 @@ function renderConsumerProducerPieCharts(data) {
     let othersKwh = 0;
     for (let i = 0; i < consumer.producerAllocations.length; i += 1) {
       const allocation = consumer.producerAllocations[i];
+      if (allocation.shared < 0.001) continue;
       if (allocation.shared / totalShared >= 0.05) {
         mainItems.push({ name: allocation.name, shared: allocation.shared, colorIndex: i });
       } else {
@@ -2992,6 +3010,244 @@ function computeDailyProducerBreakdown(intervals, producers) {
     ),
     nonSharedSeries: sorted.map((day) => Number(day.nonSharedTotal) || 0),
   };
+}
+
+function renderFlowHeatmap(data) {
+  const wrap = document.getElementById("flowHeatmapWrap");
+  const section = document.getElementById("flowHeatmapSection");
+  if (!wrap || !section) return;
+
+  // Only show on the main sharing page, not on the member view
+  if (isMemberSharingPage) {
+    section.hidden = true;
+    wrap.innerHTML = "";
+    return;
+  }
+
+  const allocations = computeProducerConsumerAllocations(data);
+  const consumers = data.consumers;
+
+  // Filter out producers and consumers with zero total flow
+  const activeProducers = allocations.filter(p =>
+    p.consumerAllocations.some(ca => ca.shared > 0.001)
+  );
+  if (activeProducers.length === 0 || consumers.length === 0) {
+    section.hidden = true;
+    wrap.innerHTML = "";
+    return;
+  }
+
+  // Global max for colour scale
+  const globalMax = Math.max(...activeProducers.flatMap(p =>
+    p.consumerAllocations.map(ca => ca.shared)
+  ));
+
+  function cellBg(value) {
+    if (globalMax < 0.001 || value < 0.001) return "";
+    const alpha = Math.max(0.06, value / globalMax);
+    return `background:rgba(39,174,96,${alpha.toFixed(3)});`;
+  }
+
+  function cellText(value, rowTotal) {
+    if (value < 0.001) return `<span style="color:#ccc;">—</span>`;
+    const pct = rowTotal > 0.001 ? (value / rowTotal * 100).toFixed(1) : "0";
+    return `<strong>${fmt(value)}</strong><br><small style="color:#555;font-size:0.78em;">${pct} %</small>`;
+  }
+
+  const colHeaders = consumers.map(c =>
+    `<th style="text-align:center;padding:6px 8px;font-size:0.8em;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(displayEan(c.name))}">${escHtml(displayEan(c.name))}</th>`
+  ).join("");
+
+  const rows = activeProducers.map(p => {
+    const rowTotal = p.consumerAllocations.reduce((s, ca) => s + ca.shared, 0);
+    const cells = consumers.map((_, ci) => {
+      const v = p.consumerAllocations[ci] ? p.consumerAllocations[ci].shared : 0;
+      return `<td style="text-align:center;padding:6px 8px;font-size:0.82em;${cellBg(v)}">${cellText(v, rowTotal)}</td>`;
+    }).join("");
+    return `<tr>
+      <td style="padding:6px 10px;white-space:nowrap;font-weight:600;font-size:0.85em;">${escHtml(displayEan(p.name))}</td>
+      ${cells}
+      <td style="padding:6px 10px;text-align:right;color:var(--muted);font-size:0.82em;white-space:nowrap;">${fmt(rowTotal)}</td>
+    </tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <table style="border-collapse:collapse;font-size:0.88em;min-width:100%;">
+      <thead>
+        <tr style="background:var(--surface,#f6f7f5);">
+          <th style="text-align:left;padding:6px 10px;">Výrobna</th>
+          ${colHeaders}
+          <th style="text-align:right;padding:6px 10px;color:var(--muted);">Celkem</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  section.hidden = false;
+}
+
+function escHtml(s) {
+  return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function renderEffTrendChart(data) {
+  const section = document.getElementById("effTrendSection");
+  const el = document.getElementById("effTrendChart");
+  if (!section || !el) return;
+
+  // Member view: only show when member has own producers
+  if (isMemberSharingPage) {
+    if (getMemberOwnedProducerCount() === 0) { section.hidden = true; return; }
+  }
+
+  // Resolve producer filter: specific selection, member's own set, or all
+  const producerIdx = gSelectedProducerName
+    ? data.producers.findIndex(p => p.name === gSelectedProducerName)
+    : -1;
+  const ownIndices = (isMemberSharingPage && !gSelectedProducerName && gMemberScope && Array.isArray(gMemberScope.ownProducers))
+    ? gMemberScope.ownProducers.map(name => data.producers.findIndex(p => p.name === name)).filter(i => i >= 0)
+    : null;
+
+  const map = new Map();
+  for (const iv of data.intervals) {
+    const d = iv.start instanceof Date ? iv.start : new Date(iv.start);
+    const key = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+    const cur = map.get(key) || { production: 0, sharing: 0 };
+    if (producerIdx >= 0 && Array.isArray(iv.producers) && iv.producers[producerIdx]) {
+      const p = iv.producers[producerIdx];
+      cur.production += Number(p.before) || 0;
+      cur.sharing    += Math.max(0, (Number(p.before) || 0) - (Number(p.after) || 0));
+    } else if (ownIndices && Array.isArray(iv.producers)) {
+      for (const idx of ownIndices) {
+        const p = iv.producers[idx];
+        if (!p) continue;
+        cur.production += Number(p.before) || 0;
+        cur.sharing    += Math.max(0, (Number(p.before) || 0) - (Number(p.after) || 0));
+      }
+    } else {
+      cur.production += Number(iv.sumProduction) || 0;
+      cur.sharing    += Number(iv.sumSharing)    || 0;
+    }
+    map.set(key, cur);
+  }
+  const sorted = [...map.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+  if (sorted.length === 0) return;
+
+  const titleEl = section.querySelector(".sharing-section-head h2");
+  if (titleEl) {
+    titleEl.textContent = producerIdx >= 0
+      ? `Efektivita sdílení – ${displayEan(gSelectedProducerName)}`
+      : "Efektivita sdílení – denní trend";
+  }
+
+  const labels = sorted.map(([k]) => { const [,m,d] = k.split("-"); return `${Number(d)}.${Number(m)}.`; });
+  const eff    = sorted.map(([,v]) => v.production > 0.01 ? +(v.sharing / v.production * 100).toFixed(1) : null);
+
+  destroyChartForElement(el);
+  const chart = echarts.init(el);
+  chart.setOption({
+    tooltip: { trigger: "axis", formatter: params => {
+      const p = params[0];
+      return `${labels[p.dataIndex]}<br/>${p.seriesName}: ${p.value != null ? p.value + " %" : "—"}`;
+    }},
+    grid: { top: 20, bottom: 40, left: 50, right: 20, containLabel: false },
+    xAxis: { type: "category", data: labels, axisLabel: { fontSize: 10, rotate: 45, interval: Math.floor(labels.length / 20) } },
+    yAxis: { type: "value", min: 0, max: 100, axisLabel: { formatter: v => v + " %", fontSize: 10 } },
+    series: [{
+      name: "Efektivita",
+      type: "line",
+      data: eff,
+      smooth: true,
+      symbol: "circle",
+      symbolSize: 4,
+      lineStyle: { color: "#28a745", width: 2 },
+      itemStyle: { color: "#28a745" },
+      areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1,
+        colorStops: [{ offset: 0, color: "rgba(40,167,69,0.35)" }, { offset: 1, color: "rgba(40,167,69,0)" }] } },
+      connectNulls: false,
+    }],
+  });
+  section.hidden = false;
+}
+
+function renderActivityHeatmap(data) {
+  const section = document.getElementById("activityHeatmapSection");
+  const wrap    = document.getElementById("activityHeatmapWrap");
+  if (!section || !wrap) return;
+
+  // Member view: only show when member has own producers
+  if (isMemberSharingPage) {
+    if (getMemberOwnedProducerCount() === 0) { section.hidden = true; return; }
+  }
+
+  // Resolve producer filter: specific selection, member's own set, or all
+  const producerIdx = gSelectedProducerName
+    ? data.producers.findIndex(p => p.name === gSelectedProducerName)
+    : -1;
+  const ownIndices = (isMemberSharingPage && !gSelectedProducerName && gMemberScope && Array.isArray(gMemberScope.ownProducers))
+    ? gMemberScope.ownProducers.map(name => data.producers.findIndex(p => p.name === name)).filter(i => i >= 0)
+    : null;
+
+  const titleEl = section.querySelector(".sharing-section-head h2");
+  if (titleEl) {
+    titleEl.textContent = producerIdx >= 0
+      ? `Aktivita sdílení – ${displayEan(gSelectedProducerName)} – den × hodina`
+      : "Aktivita sdílení – den × hodina";
+  }
+
+  const dayMap = new Map();
+  for (const iv of data.intervals) {
+    const d = iv.start instanceof Date ? iv.start : new Date(iv.start);
+    const key = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+    if (!dayMap.has(key)) dayMap.set(key, new Array(24).fill(0));
+    let sharing;
+    if (producerIdx >= 0 && Array.isArray(iv.producers) && iv.producers[producerIdx]) {
+      const p = iv.producers[producerIdx];
+      sharing = Math.max(0, (Number(p.before) || 0) - (Number(p.after) || 0));
+    } else if (ownIndices && Array.isArray(iv.producers)) {
+      sharing = 0;
+      for (const idx of ownIndices) {
+        const p = iv.producers[idx];
+        if (!p) continue;
+        sharing += Math.max(0, (Number(p.before) || 0) - (Number(p.after) || 0));
+      }
+    } else {
+      sharing = Number(iv.sumSharing) || 0;
+    }
+    dayMap.get(key)[d.getHours()] += sharing;
+  }
+  const sorted = [...dayMap.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+  if (sorted.length === 0) return;
+
+  let globalMax = 0;
+  for (const [,hours] of sorted) for (const v of hours) if (v > globalMax) globalMax = v;
+
+  const fmtV = v => {
+    if (v < 0.05) return "";
+    if (v >= 1000) return (v/1000).toFixed(1) + " MWh";
+    return v.toFixed(1) + " kWh";
+  };
+
+  const hourLabels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2,"0"));
+  let html = '<table class="sharing-heatmap-table"><thead><tr><th></th>' +
+    hourLabels.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>";
+
+  for (const [key, hours] of sorted) {
+    const [,m,d] = key.split("-");
+    html += `<tr><td class="sharing-heatmap-day">${Number(d)}.${Number(m)}.</td>`;
+    for (const v of hours) {
+      const alpha = globalMax > 0 ? v / globalMax : 0;
+      const bg = alpha < 0.05
+        ? "var(--surface-2,#f9fafb)"
+        : `rgba(${Math.round(40+(230-40)*(1-alpha))},${Math.round(167+(243-167)*(1-alpha))},${Math.round(69+(244-69)*(1-alpha))},1)`;
+      const color = alpha > 0.5 ? "#fff" : "#555";
+      html += `<td style="background:${bg};color:${color}" title="${fmtV(v) || "0 kWh"}">${fmtV(v)}</td>`;
+    }
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+  section.hidden = false;
 }
 
 function renderProducerDailyTotalsChart(data) {
@@ -3983,6 +4239,8 @@ function renderSharingPage(data) {
     drawProducerOverviewChart(dom.producerChart, producerStats, null);
   }
   renderEmbedTenantTotals(data);
+  renderEffTrendChart(data);
+  renderActivityHeatmap(data);
   renderProducerDailyTotalsChart(data);
   renderConsumerDailyTotalsChart(data);
   renderProducerPieCharts(producerStats);
@@ -4000,7 +4258,7 @@ function renderSharingPage(data) {
   }
 }
 
-function renderEmbedTenantTotals(data) {
+function renderEmbedTenantTotals(_data) {
   if (pageMode !== "enerkom-report") {
     return;
   }
@@ -4019,13 +4277,23 @@ function renderEmbedTenantTotals(data) {
     return;
   }
 
-  const now = new Date();
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+  // Always use the full dataset for period breakdowns — the filtered view covers only
+  // the last 30 days, which would cut off the beginning of the previous month.
+  const fullData = gData || _data;
+  if (!fullData || fullData.intervals.length === 0) {
+    return;
+  }
+
+  // Derive the reference month from the LAST interval in the full dataset, not from
+  // the wall clock. This way the labels stay correct even for historical imports.
+  const lastInterval = fullData.intervals[fullData.intervals.length - 1];
+  const lastStart = lastInterval.start instanceof Date ? lastInterval.start : new Date(lastInterval.start);
+  const currentMonthStart = new Date(lastStart.getFullYear(), lastStart.getMonth(), 1, 0, 0, 0, 0);
+  const nextMonthStart = new Date(lastStart.getFullYear(), lastStart.getMonth() + 1, 1, 0, 0, 0, 0);
+  const lastMonthStart = new Date(lastStart.getFullYear(), lastStart.getMonth() - 1, 1, 0, 0, 0, 0);
   const CO2_KG_PER_KWH = 0.4;
 
-  const totals = data.intervals.reduce((acc, interval) => {
+  const totals = fullData.intervals.reduce((acc, interval) => {
     const start = interval && interval.start instanceof Date ? interval.start : new Date(interval && interval.start);
     const production = Number(interval.sumProduction) || 0;
     const sharing = Number(interval.sumSharing) || 0;
@@ -4053,6 +4321,13 @@ function renderEmbedTenantTotals(data) {
   totalProductionEl.textContent = fmt(totals.production);
   totalSharingEl.textContent = fmt(totals.sharing);
 
+  // Update row labels to show the actual month names
+  const monthFmt = new Intl.DateTimeFormat("cs-CZ", { month: "long", year: "numeric" });
+  const currentMonthLabelEl = document.getElementById("tenantCurrentMonthLabel");
+  const lastMonthLabelEl = document.getElementById("tenantLastMonthLabel");
+  if (currentMonthLabelEl) currentMonthLabelEl.textContent = monthFmt.format(currentMonthStart);
+  if (lastMonthLabelEl) lastMonthLabelEl.textContent = monthFmt.format(lastMonthStart);
+
   if (currentMonthProductionEl) {
     currentMonthProductionEl.textContent = fmt(totals.currentMonthProduction);
   }
@@ -4078,32 +4353,28 @@ function renderEmbedTenantTotals(data) {
 }
 
 function setupEmbedSnippet() {
-  const embedSection = document.getElementById("embedSettingsSection");
-  const codeOutput = document.getElementById("embedCodeOutput");
-  if (!embedSection || !codeOutput) {
-    return;
-  }
+  const settingsPanel = document.getElementById("settingsPanel");
+  const embedSection  = document.getElementById("embedSettingsSection");
+  const codeOutput    = document.getElementById("embedCodeOutput");
+  if (!codeOutput) return;
 
   if (pageMode === "enerkom-report") {
     const params = new URLSearchParams(window.location.search);
     const tenantId = params.get("tenantId") || "";
     const srcUrl = `${window.location.origin}/enerkom-report.html?tenantId=${encodeURIComponent(tenantId)}`;
     codeOutput.value = `<iframe src="${srcUrl}" style="width:100%;min-height:2200px;border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`;
-    embedSection.hidden = false;
+    if (embedSection) embedSection.hidden = false;
   } else if (pageMode === "sharing") {
     const isAdmin = window.edcAuth && typeof window.edcAuth.isAdmin === "function"
       ? window.edcAuth.isAdmin()
       : false;
-    if (!isAdmin) {
-      embedSection.hidden = true;
-      return;
-    }
+    if (!isAdmin) return;
     const tenantId = (window.edcAuth && typeof window.edcAuth.getTenantId === "function"
       ? window.edcAuth.getTenantId()
       : new URLSearchParams(window.location.search).get("tenantId")) || "";
     const srcUrl = `${window.location.origin}/enerkom-report.html?tenantId=${encodeURIComponent(tenantId)}`;
     codeOutput.value = `<iframe src="${srcUrl}" style="width:100%;min-height:2200px;border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`;
-    embedSection.hidden = false;
+    if (settingsPanel) settingsPanel.hidden = false;
   }
 }
 
@@ -4395,6 +4666,7 @@ function clearAllDataSections() {
   const sectionIds = [
     "metaSection", "summarySection", "sharingSection", "simulationSection", "timeFilterSection",
     "producerPieChartsSection", "producerConsumerPieChartsSection", "consumerProducerPieChartsSection",
+    "effTrendSection", "activityHeatmapSection",
     "producerDailyTotalsSection", "consumerDailyTotalsSection",
     "bestDaySection", "consumerBestDaySection", "averageDaySection", "consumerAverageDaySection",
   ];
@@ -4779,6 +5051,9 @@ if (dom.producerSummary) {
     }
     gSelectedProducerName = gSelectedProducerName === producerName ? null : producerName;
     renderSummary(getActiveData());
+    const activeData = getActiveData();
+    renderEffTrendChart(activeData);
+    renderActivityHeatmap(activeData);
   });
 }
 

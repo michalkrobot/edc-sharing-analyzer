@@ -1,4 +1,5 @@
 using Edc.Backend.Api.Features.Admin;
+using Edc.Backend.Api.Features.AllocationPlanner;
 using Edc.Backend.Api.Features.Auth;
 using Edc.Backend.Api.Features.Member;
 using Edc.Backend.Api.Features.Shared;
@@ -132,6 +133,7 @@ app.MapMemberEndpoints();
 app.MapAdminEndpoints();
 app.MapPublicEndpoints();
 app.MapSimulationEndpoints();
+app.MapAllocationPlannerEndpoints();
 app.MapFallbackToFile("index.html");
 
 var portRaw = Environment.GetEnvironmentVariable("PORT");

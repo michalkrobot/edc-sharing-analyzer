@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Příprava alokací – EDC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito+Flex:opsz,wght@6..12,400;6..12,500;6..12,600;6..12,700;6..12,800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="multi-ean-analyzer.css" />
+  </head>
+  <body data-page="planner">
+    <main class="app-shell">
+
+      <!-- Header -->
+      <header class="card" id="plannerHeader">
+        <h1>Příprava alokací</h1>
+        <p class="status" id="plannerTenantName">Načítám…</p>
+      </header>
+
+      <!-- Auth error -->
+      <section class="card" id="authErrorSection" style="display:none;">
+        <p class="status error">Přístup je pouze pro administrátory skupiny sdílení.</p>
+      </section>
+
+      <!-- Výběr měsíce -->
+      <section class="card" id="monthSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Cílový měsíc</h2>
+          <span class="sharing-section-chip">Simulace alokací</span>
+        </div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+          <div>
+            <label for="monthPicker" style="font-weight:600;display:block;margin-bottom:4px;">Měsíc pro alokace</label>
+            <input type="month" id="monthPicker" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:1rem;" />
+          </div>
+          <div style="color:var(--muted);font-size:0.88em;max-width:380px;">
+            Simulace použije historická data dostupná pro skupinu. Syntetické EAN profily se vygenerují pro vybraný měsíc.
+          </div>
+        </div>
+      </section>
+
+      <!-- EAN přehled -->
+      <section class="card" id="eansSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>EAN místa skupiny</h2>
+          <span class="sharing-section-chip" id="eansChip">0 výroben · 0 odběratelů</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;" id="eansGrid">
+          <div>
+            <h3 style="font-size:0.95rem;margin-bottom:0.5rem;">Výrobny</h3>
+            <div id="producersList" class="table-wrap"></div>
+          </div>
+          <div>
+            <h3 style="font-size:0.95rem;margin-bottom:0.5rem;">Odběratelé</h3>
+            <div id="consumersList" class="table-wrap"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Přidat syntetický EAN -->
+      <section class="card" id="addSyntheticSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Přidat EAN bez dat</h2>
+          <span class="sharing-section-chip">Syntetický profil</span>
+        </div>
+        <p style="color:var(--muted);font-size:0.88em;margin-bottom:1rem;">
+          Pro nové výrobny nebo odběratele bez historických dat. Profil se vygeneruje automaticky z typových diagramů (OTE TDZ) nebo FVE modelu pro ČR.
+        </p>
+        <form id="syntheticEanForm" style="display:grid;gap:0.75rem;max-width:520px;">
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:4px;">EAN</label>
+            <input type="text" id="synEan" placeholder="859182400…" required
+              style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;" />
+          </div>
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:4px;">Název / popis</label>
+            <input type="text" id="synLabel" placeholder="FVE Dvůr Kovářů" required
+              style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;" />
+          </div>
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:4px;">Typ místa</label>
+            <select id="synType" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
+              <option value="producer">Výrobna (FVE)</option>
+              <option value="consumer">Odběratel</option>
+            </select>
+          </div>
+          <!-- Producer fields -->
+          <div id="producerFields" style="display:grid;gap:0.75rem;">
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:4px;">Instalovaný výkon (kWp)</label>
+              <input type="number" id="synInstalledKw" min="0.1" step="0.1" placeholder="10.0"
+                style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;" />
+            </div>
+            <div style="display:grid;gap:0.75rem;grid-template-columns:1fr 1fr;">
+              <div>
+                <label style="font-weight:600;display:block;margin-bottom:4px;">Vlastní spotřeba (kWh/rok)</label>
+                <input type="number" id="synProducerAnnualKwh" min="0" step="100" placeholder="3500"
+                  style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;" />
+              </div>
+              <div>
+                <label style="font-weight:600;display:block;margin-bottom:4px;">Typ odběru (TDZ)</label>
+                <select id="synProducerTdzCategory" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
+                  <option value="domacnost">Domácnost</option>
+                  <option value="mala_firma">Malá firma / obchod</option>
+                  <option value="stredni_firma">Střední firma</option>
+                  <option value="velka_firma">Velká firma / průmysl</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <!-- Consumer fields -->
+          <div id="consumerFields" style="display:none;gap:0.75rem;grid-template-columns:1fr 1fr;">
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:4px;">Roční spotřeba (kWh)</label>
+              <input type="number" id="synAnnualKwh" min="100" step="100" placeholder="3500"
+                style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;" />
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:4px;">Kategorie (TDZ)</label>
+              <select id="synTdzCategory" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
+                <option value="domacnost">Domácnost</option>
+                <option value="mala_firma">Malá firma / obchod</option>
+                <option value="stredni_firma">Střední firma</option>
+                <option value="velka_firma">Velká firma / průmysl</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:0.75rem;">
+            <button type="submit" class="btn-primary">Přidat / uložit EAN</button>
+            <span id="synFormStatus" class="status" style="align-self:center;"></span>
+          </div>
+        </form>
+      </section>
+
+      <!-- Priority linky -->
+      <section class="card" id="priorityLinksSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Prioritní linky</h2>
+          <span class="sharing-section-chip" id="linksChip">0 vazeb</span>
+        </div>
+        <p style="color:var(--muted);font-size:0.88em;margin-bottom:1rem;">
+          Výrobna bude preferenčně dodávat energii označeným odběratelům. Odběratel může mít max. 5 prioritních výroben (pravidlo EDC). Ostatní alokace optimalizuje simulace automaticky.
+        </p>
+        <!-- Přidat link -->
+        <div style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:1.25rem;">
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:4px;">Výrobna</label>
+            <select id="linkProducerEan" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;min-width:220px;">
+              <option value="">— vyberte —</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-weight:600;display:block;margin-bottom:4px;">Odběratel</label>
+            <select id="linkConsumerEan" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;min-width:220px;">
+              <option value="">— vyberte —</option>
+            </select>
+          </div>
+          <button id="addLinkBtn" class="btn-primary">Přidat vazbu</button>
+          <span id="linkFormStatus" class="status" style="align-self:center;"></span>
+        </div>
+        <!-- Tabulka linek -->
+        <div class="table-wrap" id="linksTableWrap">
+          <p style="color:var(--muted);font-size:0.88em;">Zatím žádné prioritní vazby.</p>
+        </div>
+      </section>
+
+      <!-- Simulace -->
+      <section class="card" id="simulationSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Spustit simulaci</h2>
+          <span class="sharing-section-chip">Optimalizace alokací</span>
+        </div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+          <button id="runSimBtn" class="btn-primary" style="font-size:1rem;padding:10px 24px;">▶ Spustit simulaci</button>
+          <span id="simStatus" class="status"></span>
+        </div>
+        <div id="simProgressBar" style="display:none;margin-top:8px;">
+          <progress id="simProgressValue" max="100" value="0" style="width:100%;height:12px;"></progress>
+          <span id="simProgressEta" class="status" style="font-size:0.85em;"></span>
+        </div>
+      </section>
+
+      <!-- Výsledky -->
+      <section class="card" id="resultsSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Navrhované alokace</h2>
+          <span class="sharing-section-chip" id="resultsSummaryChip">—</span>
+        </div>
+        <p style="color:var(--muted);font-size:0.88em;margin-bottom:1rem;" id="resultsSourceSummary"></p>
+
+        <h3 style="font-size:0.95rem;margin-bottom:0.5rem;">Alokační matice výrobna → odběratel (%)</h3>
+        <div class="table-wrap" id="allocationMatrixWrap"></div>
+
+        <h3 style="font-size:0.95rem;margin:1.25rem 0 0.5rem;">Celkové sdílení za simulované období</h3>
+        <div class="table-wrap" id="sharingTotalsWrap"></div>
+
+        <div style="margin-top:1.25rem;display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">
+          <button id="exportEdcBtn" class="btn-primary" disabled>Exportovat CSV pro EDC</button>
+          <button id="exportReadableBtn" style="padding:8px 18px;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:0.95rem;" disabled>Přehledný CSV</button>
+          <span style="color:var(--muted);font-size:0.82em;">Import souboru v portálu EDC: Správa skupiny → Alokační klíče → Importovat</span>
+        </div>
+      </section>
+
+    </main>
+
+    <script defer src="auth-client.js"></script>
+    <script defer src="allocation-planner.js"></script>
+  </body>
+</html>

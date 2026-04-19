@@ -15,6 +15,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TenantEdcLinkImport> TenantEdcLinkImports => Set<TenantEdcLinkImport>();
     public DbSet<EdcReading> EdcReadings => Set<EdcReading>();
     public DbSet<EdcLinkReading> EdcLinkReadings => Set<EdcLinkReading>();
+    public DbSet<SyntheticEan> SyntheticEans => Set<SyntheticEan>();
+    public DbSet<PriorityLink> PriorityLinks => Set<PriorityLink>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -114,6 +116,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         modelBuilder.Entity<EdcReading>().Property(x => x.KwhTotal).HasColumnName("kwh_total");
         modelBuilder.Entity<EdcReading>().Property(x => x.KwhRemainder).HasColumnName("kwh_remainder");
         modelBuilder.Entity<EdcReading>().Property(x => x.KwhMissed).HasColumnName("kwh_missed");
+
+        modelBuilder.Entity<SyntheticEan>().ToTable("synthetic_eans");
+        modelBuilder.Entity<SyntheticEan>().HasKey(x => new { x.TenantId, x.Ean });
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.Ean).HasColumnName("ean");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.Label).HasColumnName("label");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.IsProducer).HasColumnName("is_producer");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.InstalledKw).HasColumnName("installed_kw");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.AnnualKwh).HasColumnName("annual_kwh");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.TdzCategory).HasColumnName("tdz_category");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.CreatedAt).HasColumnName("created_at");
+
+        modelBuilder.Entity<PriorityLink>().ToTable("priority_links");
+        modelBuilder.Entity<PriorityLink>().HasKey(x => new { x.TenantId, x.ProducerEan, x.ConsumerEan });
+        modelBuilder.Entity<PriorityLink>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<PriorityLink>().Property(x => x.ProducerEan).HasColumnName("producer_ean");
+        modelBuilder.Entity<PriorityLink>().Property(x => x.ConsumerEan).HasColumnName("consumer_ean");
+        modelBuilder.Entity<PriorityLink>().Property(x => x.CreatedAt).HasColumnName("created_at");
 
         modelBuilder.Entity<EdcLinkReading>().ToTable("edc_link_readings");
         modelBuilder.Entity<EdcLinkReading>().HasKey(x => new { x.TenantId, x.ProducerEan, x.ConsumerEan, x.TimeFrom });

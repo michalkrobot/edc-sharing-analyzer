@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zpětný test alokací – EDC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito+Flex:opsz,wght@6..12,400;6..12,500;6..12,600;6..12,700;6..12,800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="multi-ean-analyzer.css" />
+  </head>
+  <body data-page="backtest">
+    <main class="app-shell">
+
+      <!-- Header -->
+      <header class="card" id="backtestHeader">
+        <h1>Zpětný test alokací</h1>
+        <p class="status" id="backtestTenantName">Načítám…</p>
+      </header>
+
+      <!-- Auth error -->
+      <section class="card" id="authErrorSection" style="display:none;">
+        <p class="status error">Přístup je pouze pro administrátory skupiny sdílení.</p>
+      </section>
+
+      <!-- Výběr měsíce -->
+      <section class="card" id="monthSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Historické období</h2>
+          <span class="sharing-section-chip">Reálná data EDC</span>
+        </div>
+        <p style="color:var(--muted);font-size:0.88em;margin-bottom:1rem;">
+          Vyberte měsíc, pro který existují reálná data v EDC. Simulace použije skutečné čtvrthodinové hodnoty výroby a spotřeby.
+        </p>
+        <div style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
+          <div>
+            <label for="monthPicker" style="font-weight:600;display:block;margin-bottom:4px;">Měsíc</label>
+            <input type="month" id="monthPicker" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:1rem;" />
+          </div>
+          <button id="loadEansBtn" class="btn-primary">Načíst EAN místa</button>
+          <span id="loadEansStatus" class="status" style="align-self:center;"></span>
+        </div>
+      </section>
+
+      <!-- EAN přehled -->
+      <section class="card" id="eansSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>EAN místa skupiny</h2>
+          <span class="sharing-section-chip" id="eansChip">0 výroben · 0 odběratelů</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;" id="eansGrid">
+          <div>
+            <h3 style="font-size:0.95rem;margin-bottom:0.5rem;">Výrobny</h3>
+            <div id="producersList" class="table-wrap"></div>
+          </div>
+          <div>
+            <h3 style="font-size:0.95rem;margin-bottom:0.5rem;">Odběratelé</h3>
+            <div id="consumersList" class="table-wrap"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Alokační matice -->
+      <section class="card" id="matrixSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Alokační matice</h2>
+          <span class="sharing-section-chip">výrobna → odběratel (%)</span>
+        </div>
+        <p style="color:var(--muted);font-size:0.88em;margin-bottom:1rem;">
+          Zadejte alokační procenta pro každou dvojici výrobna – odběratel. Součet řádku (výrobny) nesmí překročit 100 %. Prázdná pole = 0 %.
+        </p>
+        <div class="table-wrap" id="matrixInputWrap"></div>
+        <div style="margin-top:0.75rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
+          <button id="equalDistBtn" style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:0.88em;">Rovnoměrně rozdělit</button>
+          <button id="clearMatrixBtn" style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:0.88em;">Vymazat vše</button>
+          <span id="matrixValidStatus" class="status" style="align-self:center;font-size:0.88em;"></span>
+        </div>
+      </section>
+
+      <!-- Spustit test -->
+      <section class="card" id="runSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Spustit zpětný test</h2>
+          <span class="sharing-section-chip">Přepočet dle zadané matice</span>
+        </div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+          <button id="runTestBtn" class="btn-primary" style="font-size:1rem;padding:10px 24px;">▶ Spustit test</button>
+          <span id="runStatus" class="status"></span>
+        </div>
+      </section>
+
+      <!-- Výsledky -->
+      <section class="card" id="resultsSection" style="display:none;">
+        <div class="sharing-section-head">
+          <h2>Výsledky zpětného testu</h2>
+          <span class="sharing-section-chip" id="resultsSummaryChip">—</span>
+        </div>
+        <p style="color:var(--muted);font-size:0.88em;margin-bottom:1rem;" id="resultsSourceSummary"></p>
+
+        <h3 style="font-size:0.95rem;margin-bottom:0.5rem;">Použitá alokační matice (%)</h3>
+        <div class="table-wrap" id="allocationMatrixWrap"></div>
+
+        <h3 style="font-size:0.95rem;margin:1.25rem 0 0.5rem;">Sdílení za testované období</h3>
+        <div class="table-wrap" id="sharingTotalsWrap"></div>
+      </section>
+
+    </main>
+
+    <script defer src="auth-client.js"></script>
+    <script defer src="backtest.js"></script>
+  </body>
+</html>

@@ -29,23 +29,34 @@ public sealed class SimulationService
         try
         {
             var weights = req.Weights ?? SimulationEngine.DefaultWeights;
-            var maxFails = req.MaxFails > 0 ? req.MaxFails : 600;
-            var restarts = req.Restarts > 0 ? req.Restarts : 25;
-            var startTime = DateTimeOffset.UtcNow;
+            SimulationResult result;
 
-            var result = SimulationEngine.OptimizeAllocations(
-                data, req.Rounds, maxFails, restarts, weights,
-                (step, total, best) =>
-                {
-                    var elapsed = (DateTimeOffset.UtcNow - startTime).TotalSeconds;
-                    var perStep = step > 0 ? elapsed / step : 0;
-                    var remaining = perStep * (total - step);
-                    var percent = (int)(100.0 * step / total);
-                    writer.TryWrite(new SimProgressEvent(
-                        "progress", percent, remaining,
-                        $"Optimalizace {step}/{total} | Nejlepší sdílení: {best.TotalSharing:F2} kWh",
-                        null));
-                });
+            if (req.Mode == "backtest" && req.AllocationMatrix is { Count: > 0 })
+            {
+                // Back-test: apply a fixed allocation matrix to real historical data — no optimisation
+                var matrix = req.AllocationMatrix.Select(row => row.ToArray()).ToArray();
+                result = SimulationEngine.SimulateSharing(data, matrix, req.Rounds, weights, "zpětný test – zadaná alokační matice");
+            }
+            else
+            {
+                var maxFails = req.MaxFails > 0 ? req.MaxFails : 600;
+                var restarts = req.Restarts > 0 ? req.Restarts : 25;
+                var startTime = DateTimeOffset.UtcNow;
+
+                result = SimulationEngine.OptimizeAllocations(
+                    data, req.Rounds, maxFails, restarts, weights,
+                    (step, total, best) =>
+                    {
+                        var elapsed = (DateTimeOffset.UtcNow - startTime).TotalSeconds;
+                        var perStep = step > 0 ? elapsed / step : 0;
+                        var remaining = perStep * (total - step);
+                        var percent = (int)(100.0 * step / total);
+                        writer.TryWrite(new SimProgressEvent(
+                            "progress", percent, remaining,
+                            $"Optimalizace {step}/{total} | Nejlepší sdílení: {best.TotalSharing:F2} kWh",
+                            null));
+                    });
+            }
 
             await writer.WriteAsync(new SimProgressEvent("done", 100, 0, null, result));
         }

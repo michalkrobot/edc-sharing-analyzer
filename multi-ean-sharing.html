@@ -31,27 +31,7 @@
       </header>
 
       <header class="hero">
-        <h1>Zobrazení sdílení pro více výrobních EAN</h1>
-        <p class="hero-text">
-          Nahráj CSV report a hned uvidíš skutečné sdílení z dat. Tato stránka nepoužívá simulaci ani optimalizaci.
-        </p>
         <div id="pageNavMount"></div>
-        <section class="sharing-hero-strip" aria-label="Hlavní přínosy přehledu sdílení">
-          <article class="sharing-hero-strip-card">
-            <span class="sharing-hero-strip-label">Rychlý audit</span>
-            <strong>Skutečné sdílení bez výpočtu scénářů</strong>
-            <p>Jedno nahrání CSV a okamžitě vidíš souhrn i rozpad mezi výrobními a odběrnými EAN.</p>
-          </article>
-          <article class="sharing-hero-strip-card">
-            <span class="sharing-hero-strip-label">Co uvidíš</span>
-            <div class="sharing-hero-tags">
-              <span>souhrn výrobních EAN</span>
-              <span>souhrn odběrných EAN</span>
-              <span>rozpad po rozkliknutí řádku</span>
-              <span>koláčové a časové grafy</span>
-            </div>
-          </article>
-        </section>
       </header>
 
       <section class="card" id="sharingGroupFilterSection" hidden>
@@ -61,40 +41,6 @@
             <option value="">-- Vyberte skupinu sdílení --</option>
           </select>
         </div>
-      </section>
-
-      <section class="card" id="embedSettingsSection" hidden>
-        <div class="sharing-section-head">
-          <h2>Nastavení vložení</h2>
-          <span class="sharing-section-chip">Embed</span>
-        </div>
-        <p class="section-description">Zkopíruj kód a vlož ho na cílovou stránku.</p>
-        <p class="section-description">
-          Postup vložení: 1) ponech v URL parametr tenantId, 2) zkopíruj níže uvedený iframe,
-          3) vlož jej do HTML cílové stránky na místo, kde chceš zobrazit report,
-          4) publikuj změny na cílovém webu.
-        </p>
-        <label class="time-range-field" for="embedCodeOutput">
-          Kód pro vložení
-          <textarea id="embedCodeOutput" rows="5" readonly></textarea>
-        </label>
-      </section>
-
-      <section class="card controls">
-        <div id="fileUploadControls">
-          <div class="control-grid">
-            <label>
-              CSV report
-              <input id="uploadCsv" type="file" accept=".csv,text/csv" />
-            </label>
-            <label>
-              EAN názvy (vlastní databáze)
-              <input id="uploadEanLabels" type="file" accept=".csv,text/csv" />
-            </label>
-          </div>
-        </div>
-        <p id="status" class="status">Čekám na nahrání CSV...</p>
-        <p id="eanLabelsStatus" class="status" style="font-size: 0.85rem; color: #5f6d5c; margin-top: 0.3rem;">EAN databáze: připraveno</p>
       </section>
 
       <section class="card time-range-card" id="timeFilterSection" hidden>
@@ -139,7 +85,7 @@
         </div>
         <div class="time-thermometer" aria-label="Teplomer casoveho filtru">
           <div class="time-thermometer-head">
-            <strong>Teplomer intervalu</strong>
+            <strong>Vyber interval</strong>
             <span>Posuvniky upravis zacatek a konec obdobi.</span>
           </div>
           <div class="time-thermometer-track-wrap">
@@ -155,7 +101,7 @@
         <p id="timeFilterInfo" class="summary-filter-status">Filtr není aktivní.</p>
       </section>
 
-      <section class="card" id="metaSection" hidden>
+      <!-- <section class="card" id="metaSection" hidden>
         <h2>Informace o souboru</h2>
         <table class="meta-table">
           <tbody>
@@ -167,7 +113,7 @@
             <tr><th>Odběrné EAN</th><td id="metaConsumers"></td></tr>
           </tbody>
         </table>
-      </section>
+      </section> -->
 
       <section class="card summary-stacked" id="summarySection" hidden>
         <div class="sharing-section-head">
@@ -205,6 +151,25 @@
             <div class="table-wrap"><table id="consumerSummary"></table></div>
           </article>
         </div>
+      </section>
+
+
+      <section class="card" id="effTrendSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Efektivita sdílení – denní trend</h2>
+          <span class="sharing-section-chip">Trend efektivity</span>
+        </div>
+        <p class="section-description">Podíl sdílení / výroba za každý den ve vybraném období.</p>
+        <div id="effTrendChart" class="chart-canvas chart-canvas-wide"></div>
+      </section>
+
+      <section class="card" id="activityHeatmapSection" hidden>
+        <div class="sharing-section-head">
+          <h2>Aktivita sdílení – den × hodina</h2>
+          <span class="sharing-section-chip">Heatmapa</span>
+        </div>
+        <p class="section-description">Sdílení (kWh) podle dne a hodiny. Intenzita barvy odpovídá množství sdílené energie.</p>
+        <div class="table-wrap" id="activityHeatmapWrap"></div>
       </section>
 
       <section class="card" id="producerDailyTotalsSection" hidden>
@@ -260,6 +225,26 @@
         <p class="section-description">Průměr přes všechny dny v souboru - výroba, spotřeba a sdílení po 15minutových intervalech.</p>
         <div id="averageDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
+
+      <details class="card settings-panel" id="settingsPanel" hidden>
+        <summary class="settings-panel-summary">Nastavení</summary>
+        <div id="embedSettingsSection">
+          <div class="sharing-section-head" style="margin-top:1rem">
+            <h2>Nastavení vložení</h2>
+            <span class="sharing-section-chip">Embed</span>
+          </div>
+          <p class="section-description">Zkopíruj kód a vlož ho na cílovou stránku.</p>
+          <p class="section-description">
+            Postup vložení: 1) ponech v URL parametr tenantId, 2) zkopíruj níže uvedený iframe,
+            3) vlož jej do HTML cílové stránky na místo, kde chceš zobrazit report,
+            4) publikuj změny na cílovém webu.
+          </p>
+          <label class="time-range-field" for="embedCodeOutput">
+            Kód pro vložení
+            <textarea id="embedCodeOutput" rows="5" readonly></textarea>
+          </label>
+        </div>
+      </details>
 
       <footer class="enerkom-site-footer card">
         <div class="enerkom-site-footer-meta">

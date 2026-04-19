@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Statistiky sdílení – ENERKOM HP</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:       #0056b3;
+      --blue-light: #e8f0fb;
+      --green:      #28a745;
+      --green-light:#e6f5ea;
+      --amber:      #e07b00;
+      --amber-light:#fff3e0;
+      --gray-50:    #f9fafb;
+      --gray-100:   #f3f4f6;
+      --gray-200:   #e5e7eb;
+      --gray-500:   #6b7280;
+      --gray-700:   #374151;
+      --gray-900:   #111827;
+      --radius:     10px;
+      --shadow:     0 1px 4px rgba(0,0,0,.08);
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f0f4f8;
+      color: var(--gray-900);
+      padding: 20px 16px 40px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .container { max-width: 1060px; margin: 0 auto; }
+
+    /* ── Header ── */
+    .page-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #fff;
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      box-shadow: var(--shadow);
+      margin-bottom: 12px;
+    }
+    .page-header h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--blue);
+      flex: 1;
+    }
+    .edc-badge {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      background: var(--blue-light);
+      color: var(--blue);
+      border-radius: 20px;
+      padding: 3px 10px;
+      white-space: nowrap;
+    }
+
+    /* ── Info bar ── */
+    .info-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 20px;
+      font-size: 0.78rem;
+      color: var(--gray-500);
+      background: #fff;
+      border-radius: var(--radius);
+      padding: 10px 20px;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+    .info-bar strong { color: var(--gray-700); }
+    .info-bar .dot { color: var(--gray-200); }
+
+    /* ── Cards ── */
+    .card {
+      background: #fff;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--gray-500);
+      margin-bottom: 14px;
+    }
+
+    /* ── KPI strip ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .kpi-card {
+      background: #fff;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px 18px;
+      border-top: 3px solid var(--blue);
+    }
+    .kpi-card.green  { border-top-color: var(--green); }
+    .kpi-card.amber  { border-top-color: var(--amber); }
+    .kpi-card.purple { border-top-color: #7c3aed; }
+    .kpi-card.teal   { border-top-color: #0891b2; }
+    .kpi-card.indigo { border-top-color: #4f46e5; }
+
+    .kpi-label {
+      font-size: 0.74rem;
+      color: var(--gray-500);
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    .kpi-value {
+      font-size: 1.55rem;
+      font-weight: 700;
+      color: var(--gray-900);
+      line-height: 1.1;
+    }
+    .kpi-value.loading { color: var(--gray-200); font-size: 1.1rem; }
+    .kpi-sub {
+      font-size: 0.72rem;
+      color: var(--gray-500);
+      margin-top: 3px;
+    }
+
+    /* ── Charts row ── */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 680px) { .charts-row { grid-template-columns: 1fr; } }
+    .chart-wrap { position: relative; height: 240px; }
+    .chart-wrap canvas { max-height: 240px; }
+
+    /* ── Heatmap ── */
+    .heatmap-scroll { overflow-x: auto; }
+    .heatmap-table {
+      border-collapse: collapse;
+      font-size: 0.7rem;
+      min-width: 600px;
+      width: 100%;
+    }
+    .heatmap-table th {
+      padding: 3px 5px;
+      color: var(--gray-500);
+      font-weight: 500;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .heatmap-table td {
+      width: 36px;
+      height: 22px;
+      text-align: center;
+      font-size: 0.65rem;
+      border-radius: 3px;
+      cursor: default;
+      transition: opacity .15s;
+    }
+    .heatmap-table td:hover { opacity: .8; }
+    .heatmap-day-label {
+      text-align: right !important;
+      padding-right: 6px;
+      color: var(--gray-500);
+      font-size: 0.68rem;
+      white-space: nowrap;
+    }
+
+    /* ── History table ── */
+    table.hist {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+    }
+    table.hist th {
+      background: var(--gray-50);
+      color: var(--gray-500);
+      font-weight: 600;
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      padding: 8px 10px;
+      text-align: right;
+      border-bottom: 1px solid var(--gray-200);
+    }
+    table.hist th:first-child { text-align: left; }
+    table.hist td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--gray-100);
+      text-align: right;
+    }
+    table.hist td:first-child { text-align: left; }
+    table.hist tr:last-child td { border-bottom: none; }
+    table.hist tr:hover td { background: var(--gray-50); }
+    .eff-high { color: var(--green); font-weight: 600; }
+    .eff-mid  { color: var(--amber); font-weight: 600; }
+    .eff-low  { color: #dc2626; font-weight: 600; }
+
+    /* ── Error / empty states ── */
+    .state-msg {
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--gray-500);
+      font-size: 0.9rem;
+    }
+    .state-msg.error { color: #dc2626; }
+
+    /* ── Heatmap legend ── */
+    .heatmap-legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.72rem;
+      color: var(--gray-500);
+      margin-top: 10px;
+    }
+    .heatmap-legend-bar {
+      height: 12px;
+      width: 120px;
+      border-radius: 4px;
+      background: linear-gradient(to right, #e6f5ea, #28a745);
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="page-header">
+    <h1>Statistiky sdílení elektřiny</h1>
+    <span class="edc-badge">Zdroj dat: EDC</span>
+  </div>
+
+  <!-- Info bar -->
+  <div class="info-bar" id="infoBar">
+    <span>Načítám data…</span>
+  </div>
+
+  <!-- KPI strip -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Celkem nasdíleno</div>
+      <div class="kpi-value loading" id="kpiTotalSharing">…</div>
+      <div class="kpi-sub" id="kpiTotalSharingPeriod"></div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">Průměrná efektivita</div>
+      <div class="kpi-value loading" id="kpiAvgEff">…</div>
+      <div class="kpi-sub">podíl sdílení / výroba</div>
+    </div>
+    <div class="kpi-card amber">
+      <div class="kpi-label">Ušlá příležitost</div>
+      <div class="kpi-value loading" id="kpiMissed">…</div>
+      <div class="kpi-sub" id="kpiMissedPct"></div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-label">Ušetřené CO₂</div>
+      <div class="kpi-value loading" id="kpiCo2">…</div>
+      <div class="kpi-sub">0,43 kg CO₂ / kWh</div>
+    </div>
+    <div class="kpi-card teal">
+      <div class="kpi-label" id="kpiMonthLabel">Tento měsíc – sdíleno</div>
+      <div class="kpi-value loading" id="kpiThisMonth">…</div>
+      <div class="kpi-sub" id="kpiThisMonthEff"></div>
+    </div>
+    <div class="kpi-card indigo">
+      <div class="kpi-label">EAN míst v komunitě</div>
+      <div class="kpi-value loading" id="kpiEanCount">…</div>
+      <div class="kpi-sub" id="kpiEanSub"></div>
+    </div>
+  </div>
+
+  <!-- Monthly trend -->
+  <div class="card">
+    <div class="card-title">Měsíční trend – výroba vs sdílení</div>
+    <div class="chart-wrap" style="height:260px">
+      <canvas id="monthlyTrendChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Last day + 30-day efficiency -->
+  <div class="charts-row">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title" id="lastDayTitle">Poslední den – průběh (hod.)</div>
+      <div class="chart-wrap">
+        <canvas id="lastDayChart"></canvas>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">Efektivita – posledních 30 dní</div>
+      <div class="chart-wrap">
+        <canvas id="effTrendChart"></canvas>
+      </div>
+    </div>
+  </div>
+  <div style="margin-bottom:16px"></div>
+
+  <!-- Activity heatmap -->
+  <div class="card">
+    <div class="card-title">Aktivita sdílení – den × hodina (kWh)</div>
+    <div class="heatmap-scroll" id="heatmapWrap">
+      <div class="state-msg">Načítám…</div>
+    </div>
+    <div class="heatmap-legend" id="heatmapLegend" style="display:none">
+      <span>0</span>
+      <div class="heatmap-legend-bar"></div>
+      <span id="heatmapLegendMax"></span>
+    </div>
+  </div>
+
+  <!-- History table -->
+  <div class="card">
+    <div class="card-title">Historie posledních 30 dní</div>
+    <div id="historyTableWrap">
+      <div class="state-msg">Načítám…</div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+"use strict";
+
+// ── CO2 factor ────────────────────────────────────────────────────────────────
+const CO2_KG_PER_KWH = 0.43;
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+function fmtKwh(kwh) {
+  if (kwh == null || isNaN(kwh)) return "—";
+  if (kwh >= 1000000) return (kwh / 1000000).toFixed(2).replace(".", ",") + " GWh";
+  if (kwh >= 1000)    return (kwh / 1000).toFixed(2).replace(".", ",") + " MWh";
+  return kwh.toFixed(1).replace(".", ",") + " kWh";
+}
+function fmtPct(v) {
+  if (v == null || isNaN(v)) return "—";
+  return Math.round(v) + " %";
+}
+function fmtCo2(kwh) {
+  if (kwh == null || isNaN(kwh)) return "—";
+  const kg = kwh * CO2_KG_PER_KWH;
+  if (kg >= 1000) return (kg / 1000).toFixed(2).replace(".", ",") + " t CO₂";
+  return kg.toFixed(1).replace(".", ",") + " kg CO₂";
+}
+function dayKey(date) {
+  return date.getFullYear() + "-" +
+    String(date.getMonth() + 1).padStart(2, "0") + "-" +
+    String(date.getDate()).padStart(2, "0");
+}
+function fmtDayLabel(isoKey) {
+  const [y, m, d] = isoKey.split("-");
+  return `${Number(d)}. ${Number(m)}. ${y}`;
+}
+function fmtMonthLabel(date) {
+  return date.toLocaleDateString("cs-CZ", { month: "long", year: "numeric" });
+}
+function fmtMonthShort(isoKey) {
+  const [y, m] = isoKey.split("-");
+  const d = new Date(Number(y), Number(m) - 1, 1);
+  return d.toLocaleDateString("cs-CZ", { month: "short" }) + " " + y;
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+async function loadData(tenantId) {
+  const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
+  const resp = await fetch(`${apiBase}/public/tenant-sharing-data?tenantId=${encodeURIComponent(tenantId)}`);
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${resp.status}`);
+  }
+  return resp.json();
+}
+
+// ── Aggregation ───────────────────────────────────────────────────────────────
+function buildDayTotals(intervals) {
+  const map = new Map();
+  for (const iv of intervals) {
+    const d = new Date(Number(iv.start));
+    const key = dayKey(d);
+    const cur = map.get(key) || { production: 0, sharing: 0, missed: 0 };
+    cur.production += Number(iv.sumProduction) || 0;
+    cur.sharing    += Number(iv.sumSharing)    || 0;
+    cur.missed     += Number(iv.sumMissed)     || 0;
+    map.set(key, cur);
+  }
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function buildMonthTotals(dayTotals) {
+  const map = new Map();
+  for (const [key, d] of dayTotals) {
+    const mKey = key.slice(0, 7); // "YYYY-MM"
+    const cur = map.get(mKey) || { production: 0, sharing: 0, missed: 0 };
+    cur.production += d.production;
+    cur.sharing    += d.sharing;
+    cur.missed     += d.missed;
+    map.set(mKey, cur);
+  }
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function buildHourlyForDay(intervals, dayIsoKey) {
+  const hourly = Array.from({ length: 24 }, () => ({ production: 0, sharing: 0, missed: 0 }));
+  for (const iv of intervals) {
+    const d = new Date(Number(iv.start));
+    if (dayKey(d) !== dayIsoKey) continue;
+    const h = d.getHours();
+    hourly[h].production += Number(iv.sumProduction) || 0;
+    hourly[h].sharing    += Number(iv.sumSharing)    || 0;
+    hourly[h].missed     += Number(iv.sumMissed)     || 0;
+  }
+  return hourly;
+}
+
+// Build heatmap: Map<"YYYY-MM-DD", Array[24]> for last N days
+function buildHeatmap(intervals, days) {
+  const dayMap = new Map();
+  for (const iv of intervals) {
+    const d = new Date(Number(iv.start));
+    const key = dayKey(d);
+    if (!dayMap.has(key)) dayMap.set(key, new Array(24).fill(0));
+    dayMap.get(key)[d.getHours()] += Number(iv.sumSharing) || 0;
+  }
+  const sorted = [...dayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return sorted.slice(-days);
+}
+
+// ── Chart instances ───────────────────────────────────────────────────────────
+let charts = {};
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+// ── Render: KPI strip ─────────────────────────────────────────────────────────
+function renderKpis(dayTotals, intervals, producerCount, consumerCount) {
+  if (dayTotals.length === 0) return;
+
+  const totalSharing    = dayTotals.reduce((s, [, d]) => s + d.sharing, 0);
+  const totalProduction = dayTotals.reduce((s, [, d]) => s + d.production, 0);
+  const totalMissed     = dayTotals.reduce((s, [, d]) => s + d.missed, 0);
+  const avgEff = totalProduction > 0.01 ? (totalSharing / totalProduction) * 100 : null;
+  const missedPct = (totalSharing + totalMissed) > 0.01
+    ? (totalMissed / (totalSharing + totalMissed)) * 100 : null;
+
+  // Period label for totals
+  const [firstKey] = dayTotals[0];
+  const [lastKey]  = dayTotals[dayTotals.length - 1];
+  document.getElementById("kpiTotalSharing").textContent = fmtKwh(totalSharing);
+  document.getElementById("kpiTotalSharing").classList.remove("loading");
+  document.getElementById("kpiTotalSharingPeriod").textContent =
+    fmtDayLabel(firstKey) + " – " + fmtDayLabel(lastKey);
+
+  document.getElementById("kpiAvgEff").textContent = fmtPct(avgEff);
+  document.getElementById("kpiAvgEff").classList.remove("loading");
+
+  document.getElementById("kpiMissed").textContent = fmtKwh(totalMissed);
+  document.getElementById("kpiMissed").classList.remove("loading");
+  document.getElementById("kpiMissedPct").textContent = missedPct != null
+    ? fmtPct(missedPct) + " z potenciálu" : "";
+
+  document.getElementById("kpiCo2").textContent = fmtCo2(totalSharing);
+  document.getElementById("kpiCo2").classList.remove("loading");
+
+  // This month (relative to last data date)
+  const lastDate = new Date(lastKey + "T00:00:00");
+  const mStart = new Date(lastDate.getFullYear(), lastDate.getMonth(), 1);
+  const mEnd   = new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 1);
+
+  const thisMonthSharing = intervals.reduce((s, iv) => {
+    const d = new Date(Number(iv.start));
+    return (d >= mStart && d < mEnd) ? s + (Number(iv.sumSharing) || 0) : s;
+  }, 0);
+  const thisMonthProd = intervals.reduce((s, iv) => {
+    const d = new Date(Number(iv.start));
+    return (d >= mStart && d < mEnd) ? s + (Number(iv.sumProduction) || 0) : s;
+  }, 0);
+  const thisMonthEff = thisMonthProd > 0.01 ? (thisMonthSharing / thisMonthProd) * 100 : null;
+
+  document.getElementById("kpiMonthLabel").textContent = fmtMonthLabel(mStart) + " – sdíleno";
+  document.getElementById("kpiThisMonth").textContent = fmtKwh(thisMonthSharing);
+  document.getElementById("kpiThisMonth").classList.remove("loading");
+  document.getElementById("kpiThisMonthEff").textContent = thisMonthEff != null
+    ? "efektivita " + fmtPct(thisMonthEff) : "";
+
+  // EAN counts
+  const total = (producerCount || 0) + (consumerCount || 0);
+  document.getElementById("kpiEanCount").textContent = total > 0 ? String(total) : "—";
+  document.getElementById("kpiEanCount").classList.remove("loading");
+  document.getElementById("kpiEanSub").textContent =
+    producerCount + " výrobní · " + consumerCount + " odběrné";
+}
+
+// ── Render: Info bar ──────────────────────────────────────────────────────────
+function renderInfoBar(intervals, producerCount, consumerCount) {
+  const last = intervals[intervals.length - 1];
+  const lastDt = new Date(Number(last.start));
+  const total = producerCount + consumerCount;
+  document.getElementById("infoBar").innerHTML =
+    `<span>Poslední data: <strong>${fmtDayLabel(dayKey(lastDt))}</strong></span>` +
+    `<span class="dot">·</span>` +
+    `<span>Zdroj: <strong>EDC (Energetické datové centrum)</strong></span>` +
+    `<span class="dot">·</span>` +
+    `<span><strong>${producerCount}</strong> výrobní EAN</span>` +
+    `<span class="dot">·</span>` +
+    `<span><strong>${consumerCount}</strong> odběrné EAN</span>` +
+    `<span class="dot">·</span>` +
+    `<span>celkem <strong>${total}</strong> EAN v komunitě</span>`;
+}
+
+// ── Render: Monthly trend chart ───────────────────────────────────────────────
+function renderMonthlyTrend(monthTotals) {
+  destroyChart("monthly");
+  if (monthTotals.length === 0) return;
+
+  const labels = monthTotals.map(([k]) => fmtMonthShort(k));
+  const prod   = monthTotals.map(([, d]) => +d.production.toFixed(1));
+  const shar   = monthTotals.map(([, d]) => +d.sharing.toFixed(1));
+  const eff    = monthTotals.map(([, d]) =>
+    d.production > 0.01 ? +(d.sharing / d.production * 100).toFixed(1) : null);
+
+  const ctx = document.getElementById("monthlyTrendChart").getContext("2d");
+  charts.monthly = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar",
+          label: "Výroba (kWh)",
+          data: prod,
+          backgroundColor: "rgba(0,86,179,0.18)",
+          borderColor: "rgba(0,86,179,0.5)",
+          borderWidth: 1,
+          yAxisID: "y",
+          order: 2,
+        },
+        {
+          type: "bar",
+          label: "Sdílení (kWh)",
+          data: shar,
+          backgroundColor: "rgba(40,167,69,0.55)",
+          borderColor: "rgba(40,167,69,0.8)",
+          borderWidth: 1,
+          yAxisID: "y",
+          order: 1,
+        },
+        {
+          type: "line",
+          label: "Efektivita (%)",
+          data: eff,
+          borderColor: "#e07b00",
+          backgroundColor: "rgba(224,123,0,0.08)",
+          borderWidth: 2,
+          pointRadius: 4,
+          fill: false,
+          tension: 0.3,
+          yAxisID: "y2",
+          order: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "top", labels: { font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (ctx.dataset.yAxisID === "y2") return " Efektivita: " + fmtPct(v);
+              return " " + ctx.dataset.label + ": " + fmtKwh(v);
+            },
+          },
+        },
+      },
+      scales: {
+        y:  { beginAtZero: true, position: "left",  ticks: { font: { size: 10 } } },
+        y2: { beginAtZero: true, position: "right", max: 100, grid: { drawOnChartArea: false },
+               ticks: { font: { size: 10 }, callback: v => v + " %" } },
+      },
+    },
+  });
+}
+
+// ── Render: Last day detail chart ─────────────────────────────────────────────
+function renderLastDayChart(intervals, dayTotals) {
+  destroyChart("lastDay");
+
+  const todayKey = dayKey(new Date());
+
+  // Skip today (partial data) – show only the last complete day
+  const completeDays = dayTotals.filter(([k]) => k !== todayKey);
+  if (completeDays.length === 0) { destroyChart("lastDay"); return; }
+
+  const [lastKey] = completeDays[completeDays.length - 1];
+
+  document.getElementById("lastDayTitle").textContent =
+    "Průběh " + fmtDayLabel(lastKey) + " (hod.)";
+
+  const hourly = buildHourlyForDay(intervals, lastKey);
+  const labels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0") + ":00");
+  const ctx = document.getElementById("lastDayChart").getContext("2d");
+
+  const datasets = [
+    {
+      label: "Výroba (kWh)",
+      data: hourly.map(h => +h.production.toFixed(3)),
+      borderColor: "#0056b3",
+      backgroundColor: "rgba(0,86,179,0.1)",
+      fill: true,
+      tension: 0.4,
+      pointRadius: 2,
+    },
+    {
+      label: "Sdílení (kWh)",
+      data: hourly.map(h => +h.sharing.toFixed(3)),
+      borderColor: "#28a745",
+      backgroundColor: "rgba(40,167,69,0.35)",
+      fill: true,
+      tension: 0.4,
+      pointRadius: 2,
+    },
+  ];
+
+  charts.lastDay = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { labels: { font: { size: 10 } } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+        x: { ticks: { font: { size: 9 }, maxRotation: 0,
+          callback: (_, i) => i % 3 === 0 ? labels[i] : "" } },
+      },
+    },
+  });
+}
+
+// ── Render: 30-day efficiency trend ──────────────────────────────────────────
+function renderEffTrend(dayTotals) {
+  destroyChart("eff");
+  const last30 = dayTotals.slice(-30);
+  if (last30.length === 0) return;
+
+  const labels = last30.map(([k]) => {
+    const [,, d] = k.split("-");
+    return Number(d) + ".";
+  });
+  const eff = last30.map(([, d]) =>
+    d.production > 0.01 ? +(d.sharing / d.production * 100).toFixed(1) : null);
+
+  const ctx = document.getElementById("effTrendChart").getContext("2d");
+  charts.eff = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Efektivita (%)",
+        data: eff,
+        borderColor: "#28a745",
+        backgroundColor: ctx2 => {
+          const g = ctx2.chart.ctx.createLinearGradient(0, 0, 0, 200);
+          g.addColorStop(0, "rgba(40,167,69,0.35)");
+          g.addColorStop(1, "rgba(40,167,69,0)");
+          return g;
+        },
+        fill: true,
+        tension: 0.4,
+        pointRadius: 2,
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => " " + fmtPct(ctx.parsed.y) } },
+      },
+      scales: {
+        y: { beginAtZero: true, max: 100, ticks: { font: { size: 10 }, callback: v => v + " %" } },
+        x: { ticks: { font: { size: 9 }, maxRotation: 0,
+          callback: (_, i) => i % 5 === 0 ? labels[i] : "" } },
+      },
+    },
+  });
+}
+
+// ── Render: Activity heatmap ──────────────────────────────────────────────────
+function renderHeatmap(intervals) {
+  const heatData = buildHeatmap(intervals, 60);
+  if (heatData.length === 0) {
+    document.getElementById("heatmapWrap").innerHTML =
+      '<div class="state-msg">Nedostatek dat.</div>';
+    return;
+  }
+
+  let globalMax = 0;
+  for (const [, hours] of heatData)
+    for (const v of hours) if (v > globalMax) globalMax = v;
+
+  const hourLabels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0"));
+
+  let html = '<table class="heatmap-table"><thead><tr>' +
+    '<th></th>' +
+    hourLabels.map(h => `<th>${h}</th>`).join("") +
+    '</tr></thead><tbody>';
+
+  for (const [key, hours] of heatData) {
+    const [,m,d] = key.split("-");
+    html += `<tr><td class="heatmap-day-label">${Number(d)}.${Number(m)}.</td>`;
+    for (const v of hours) {
+      const alpha = globalMax > 0 ? v / globalMax : 0;
+      const r = Math.round(40 + (40 - 40) * alpha);
+      const g = Math.round(167 * alpha + 243 * (1 - alpha));
+      const b = Math.round(69 * alpha + 244 * (1 - alpha));
+      const bg = alpha < 0.05 ? "#f9fafb" : `rgb(${Math.round(40+(230-40)*(1-alpha))},${Math.round(167+(243-167)*(1-alpha))},${Math.round(69+(244-69)*(1-alpha))})`;
+      const textColor = alpha > 0.5 ? "#fff" : "#666";
+      const label = v > 0.05 ? fmtKwh(v) : "";
+      html += `<td style="background:${bg};color:${textColor}" title="${fmtDayLabel(key)} ${hourLabels[hours.indexOf(v)]}:00 – ${fmtKwh(v)}">${label}</td>`;
+    }
+    html += "</tr>";
+  }
+
+  html += "</tbody></table>";
+  document.getElementById("heatmapWrap").innerHTML = html;
+
+  // Legend
+  document.getElementById("heatmapLegend").style.display = "flex";
+  document.getElementById("heatmapLegendMax").textContent = fmtKwh(globalMax);
+}
+
+// ── Render: History table ─────────────────────────────────────────────────────
+function renderHistoryTable(dayTotals) {
+  const rows = [...dayTotals].reverse().slice(0, 30);
+  if (rows.length === 0) {
+    document.getElementById("historyTableWrap").innerHTML =
+      '<div class="state-msg">Žádná data.</div>';
+    return;
+  }
+
+  const tbody = rows.map(([key, d]) => {
+    const pct = d.production > 0.01 ? (d.sharing / d.production) * 100 : null;
+    const effClass = pct == null ? "" : pct >= 70 ? " class='eff-high'" : pct >= 40 ? " class='eff-mid'" : " class='eff-low'";
+    return `<tr>
+      <td>${fmtDayLabel(key)}</td>
+      <td>${fmtKwh(d.production)}</td>
+      <td>${fmtKwh(d.sharing)}</td>
+      <td>${fmtKwh(d.missed)}</td>
+      <td${effClass}>${fmtPct(pct)}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("historyTableWrap").innerHTML = `
+    <table class="hist">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Výroba</th>
+          <th>Sdíleno</th>
+          <th>Ušlá příl.</th>
+          <th>Efektivita</th>
+        </tr>
+      </thead>
+      <tbody>${tbody}</tbody>
+    </table>`;
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+async function main() {
+  const params   = new URLSearchParams(window.location.search);
+  const tenantId = params.get("tenantId") || "";
+
+  if (!tenantId) {
+    document.getElementById("infoBar").innerHTML =
+      '<span style="color:#dc2626">Chybí parametr <code>tenantId</code> v URL.</span>';
+    return;
+  }
+
+  let payload;
+  try {
+    payload = await loadData(tenantId);
+  } catch (err) {
+    document.getElementById("infoBar").innerHTML =
+      `<span style="color:#dc2626">Nepodařilo se načíst data: ${err.message}</span>`;
+    return;
+  }
+
+  const intervals = Array.isArray(payload.data && payload.data.intervals)
+    ? payload.data.intervals : [];
+
+  if (intervals.length === 0) {
+    document.getElementById("infoBar").innerHTML =
+      '<span style="color:#dc2626">Pro tuto skupinu nejsou k dispozici žádná data.</span>';
+    return;
+  }
+
+  const producerCount  = (payload.data.producers  || []).length;
+  const consumerCount  = (payload.data.consumers  || []).length;
+
+  const dayTotals   = buildDayTotals(intervals);
+  const monthTotals = buildMonthTotals(dayTotals);
+
+  renderInfoBar(intervals, producerCount, consumerCount);
+  renderKpis(dayTotals, intervals, producerCount, consumerCount);
+  renderMonthlyTrend(monthTotals);
+
+  renderLastDayChart(intervals, dayTotals);
+  renderEffTrend(dayTotals);
+  renderHeatmap(intervals);
+  renderHistoryTable(dayTotals);
+}
+
+document.addEventListener("DOMContentLoaded", main);
+</script>
+</body>
+</html>

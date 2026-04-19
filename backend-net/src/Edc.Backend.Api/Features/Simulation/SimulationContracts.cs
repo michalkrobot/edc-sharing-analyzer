@@ -12,7 +12,10 @@ public sealed record SimData(
     List<string> ProducerNames,
     List<string> ConsumerNames,
     List<SimInterval> Intervals,
-    bool HasExactAllocations);
+    bool HasExactAllocations,
+    List<(int ProducerIndex, int ConsumerIndex)>? ManualPriorityLinks = null,
+    List<double>? HistoricalProductionPerProducer = null,
+    List<double>? HistoricalConsumptionPerConsumer = null);
 
 public sealed record HistoricalWeights(
     double CurrentMonth,
@@ -29,7 +32,8 @@ public sealed record StartSimulationRequest(
     int Rounds,
     int MaxFails,
     int Restarts,
-    HistoricalWeights? Weights);
+    HistoricalWeights? Weights,
+    List<List<double>>? AllocationMatrix = null);
 
 public sealed record IntervalTotal(string Label, double Production, double Consumption, double Shared);
 
@@ -43,7 +47,13 @@ public sealed record SimulationResult(
     List<IntervalTotal> IntervalTotals,
     double TotalSharing,
     int RoundsUsed,
-    string SourceSummary);
+    string SourceSummary,
+    List<string> ProducerEans,
+    List<string> ConsumerEans,
+    List<double> SimulatedProductionPerProducer,
+    List<double> SimulatedConsumptionPerConsumer,
+    List<double> HistoricalProductionPerProducer,
+    List<double> HistoricalConsumptionPerConsumer);
 
 public sealed record SimProgressEvent(
     string Type,

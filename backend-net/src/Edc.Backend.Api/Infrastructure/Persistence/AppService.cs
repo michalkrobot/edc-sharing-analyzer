@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Edc.Backend.Api.Features.AllocationPlanner;
 using Edc.Backend.Api.Features.Simulation;
 using Edc.Backend.Api.Infrastructure.Auth;
 using Edc.Backend.Api.Infrastructure.Csv;
@@ -38,6 +39,14 @@ public interface IAppService
     Task<object> GetMembersAsync(AuthPrincipal auth, string? tenantId, CancellationToken cancellationToken = default);
     Task<List<object>> GetSharingGroupsAsync(AuthPrincipal auth, CancellationToken cancellationToken = default);
     Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
+
+    // Allocation planner
+    Task<List<PlannerEanDto>> GetPlannerEansAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task UpsertSyntheticEanAsync(int tenantId, UpsertSyntheticEanRequest req, CancellationToken cancellationToken = default);
+    Task DeleteSyntheticEanAsync(int tenantId, string ean, CancellationToken cancellationToken = default);
+    Task<List<PriorityLinkDto>> GetPriorityLinksAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task AddPriorityLinkAsync(int tenantId, string producerEan, string consumerEan, CancellationToken cancellationToken = default);
+    Task DeletePriorityLinkAsync(int tenantId, string producerEan, string consumerEan, CancellationToken cancellationToken = default);
 }
 
 public sealed class AppService(
@@ -903,8 +912,31 @@ public sealed class AppService(
             .OrderBy(x => x.TimeFrom).ThenBy(x => x.Ean)
             .ToListAsync(cancellationToken);
 
+        // Start of the actual data period – used to map synthetic profiles to the target month
+        var dataStart = tsFrom;
+
+        // If no data for requested period, fall back to the most recent available month
         if (readings.Count == 0)
-            throw new InvalidOperationException("Pro tuto skupinu sdílení nejsou v daném období EDC data.");
+        {
+            var latestTs = await db.EdcReadings
+                .AsNoTracking()
+                .Where(x => x.TenantId == tenantId)
+                .MaxAsync(x => (DateTimeOffset?)x.TimeFrom, cancellationToken);
+
+            if (latestTs is not { } latest)
+                throw new InvalidOperationException("Pro tuto skupinu sdílení nejsou žádná EDC data.");
+
+            // Use the calendar month that contains the latest reading
+            var fallbackFrom = new DateTimeOffset(latest.Year, latest.Month, 1, 0, 0, 0, TimeSpan.Zero);
+            var fallbackTo = fallbackFrom.AddMonths(1);
+            dataStart = fallbackFrom;
+
+            readings = await db.EdcReadings
+                .AsNoTracking()
+                .Where(x => x.TenantId == tenantId && x.TimeFrom >= fallbackFrom && x.TimeFrom < fallbackTo)
+                .OrderBy(x => x.TimeFrom).ThenBy(x => x.Ean)
+                .ToListAsync(cancellationToken);
+        }
 
         var cs = StringComparer.Create(new CultureInfo("cs-CZ"), false);
         var producerEans = readings.Where(x => x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
@@ -924,25 +956,60 @@ public sealed class AppService(
         var linksByTime = linkReadings.GroupBy(x => x.TimeFrom).ToDictionary(x => x.Key, x => x.ToList());
         var hasExactAllocations = linkReadings.Count > 0;
 
-        var intervals = readings
+        // Load synthetic EANs – use only those without real readings in this period
+        var syntheticEans = await db.SyntheticEans
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var realEanSet = new HashSet<string>(readings.Select(x => x.Ean), StringComparer.Ordinal);
+        var syntheticProducers = syntheticEans
+            .Where(x => x.IsProducer && !realEanSet.Contains(x.Ean))
+            .OrderBy(x => x.Ean, cs)
+            .ToList();
+        var syntheticConsumers = syntheticEans
+            .Where(x => !x.IsProducer && !realEanSet.Contains(x.Ean))
+            .OrderBy(x => x.Ean, cs)
+            .ToList();
+
+        foreach (var s in syntheticProducers) producerEans.Add(s.Ean);
+        foreach (var s in syntheticConsumers) consumerEans.Add(s.Ean);
+
+        // Rebuild indices after adding synthetic EANs
+        producerIndexByEan = producerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
+        consumerIndexByEan = consumerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
+
+        var syntheticProducerDict = syntheticProducers.ToDictionary(x => x.Ean, StringComparer.Ordinal);
+        var syntheticConsumerDict = syntheticConsumers.ToDictionary(x => x.Ean, StringComparer.Ordinal);
+
+        // Rebuild intervals including synthetic EAN data
+        var mergedIntervals = readings
             .GroupBy(x => x.TimeFrom)
             .OrderBy(g => g.Key)
             .Select(g =>
             {
+                var timeFrom = g.Key;
+                // Synthetic profiles use the equivalent position in the TARGET month
+                var syntheticTimeFrom = tsFrom + (timeFrom - dataStart);
+
                 var producerData = producerEans.Select(ean =>
                 {
+                    if (syntheticProducerDict.TryGetValue(ean, out var synth))
+                        return SyntheticProfileGenerator.GetProducerIntervalData(syntheticTimeFrom, synth.InstalledKw ?? 1.0, synth.AnnualKwh, synth.TdzCategory);
                     var r = g.FirstOrDefault(x => x.Ean == ean && x.IsProducer);
-                    return r is null ? new SimEanData(0d, 0d) : new SimEanData(r.KwhTotal, r.KwhRemainder);
+                    return r is null ? new SimEanData(0, 0) : new SimEanData(r.KwhTotal, r.KwhRemainder);
                 }).ToList();
 
                 var consumerData = consumerEans.Select(ean =>
                 {
+                    if (syntheticConsumerDict.TryGetValue(ean, out var synth))
+                        return SyntheticProfileGenerator.GetConsumerIntervalData(syntheticTimeFrom, synth.AnnualKwh ?? 3500, synth.TdzCategory);
                     var r = g.FirstOrDefault(x => x.Ean == ean && !x.IsProducer);
-                    return r is null ? new SimEanData(0d, 0d) : new SimEanData(r.KwhTotal, r.KwhRemainder);
+                    return r is null ? new SimEanData(0, 0) : new SimEanData(r.KwhTotal, r.KwhRemainder);
                 }).ToList();
 
                 List<List<double>>? exactAllocations = null;
-                if (linksByTime.TryGetValue(g.Key, out var links))
+                if (linksByTime.TryGetValue(timeFrom, out var links))
                 {
                     var matrix = producerEans.Select(_ => consumerEans.Select(_ => 0d).ToList()).ToList();
                     var anyLink = false;
@@ -958,10 +1025,48 @@ public sealed class AppService(
                     if (anyLink) exactAllocations = matrix;
                 }
 
-                return new SimInterval(g.Key.ToUnixTimeMilliseconds(), producerData, consumerData, exactAllocations);
+                return new SimInterval(timeFrom.ToUnixTimeMilliseconds(), producerData, consumerData, exactAllocations);
             }).ToList();
 
-        return new SimData(producerEans, consumerEans, intervals, hasExactAllocations);
+        // Load priority links and resolve indices
+        var priorityLinks = await db.PriorityLinks
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var manualPriorityLinks = priorityLinks
+            .Where(lnk => producerIndexByEan.ContainsKey(lnk.ProducerEan) && consumerIndexByEan.ContainsKey(lnk.ConsumerEan))
+            .Select(lnk => (producerIndexByEan[lnk.ProducerEan], consumerIndexByEan[lnk.ConsumerEan]))
+            .ToList();
+
+        // Historical totals from real DB readings (0 for synthetic EANs),
+        // extrapolated to a full month in case data covers only part of the month.
+        var lastReading = readings.Max(x => x.TimeFrom);
+        var daysInMonth = DateTime.DaysInMonth(dataStart.Year, dataStart.Month);
+        // How many complete days are covered (add 1 because the last day has at least some intervals)
+        var daysCovered = Math.Max(1.0, (lastReading - dataStart).TotalDays + 1.0);
+        var extrapolationFactor = daysCovered < daysInMonth - 0.5
+            ? daysInMonth / daysCovered
+            : 1.0; // full month data — no extrapolation needed
+
+        var historicalProdByEan = readings.Where(x => x.IsProducer)
+            .GroupBy(x => x.Ean)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.KwhTotal) * extrapolationFactor, StringComparer.Ordinal);
+        var historicalConsByEan = readings.Where(x => !x.IsProducer)
+            .GroupBy(x => x.Ean)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.KwhTotal) * extrapolationFactor, StringComparer.Ordinal);
+
+        var historicalProductionPerProducer = producerEans
+            .Select(ean => historicalProdByEan.GetValueOrDefault(ean, 0d))
+            .ToList();
+        var historicalConsumptionPerConsumer = consumerEans
+            .Select(ean => historicalConsByEan.GetValueOrDefault(ean, 0d))
+            .ToList();
+
+        return new SimData(producerEans, consumerEans, mergedIntervals, hasExactAllocations,
+            manualPriorityLinks.Count > 0 ? manualPriorityLinks : null,
+            historicalProductionPerProducer,
+            historicalConsumptionPerConsumer);
     }
 
     public async Task<object> ResolveTenantScopeAsync(AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default)
@@ -1580,6 +1685,155 @@ public sealed class AppService(
                 return masked;
             }
             extra++;
+        }
+    }
+
+    // ── Allocation Planner ───────────────────────────────────────────────────
+
+    public async Task<List<PlannerEanDto>> GetPlannerEansAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        var syntheticEans = await db.SyntheticEans
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var syntheticEanSet = new HashSet<string>(syntheticEans.Select(x => x.Ean), StringComparer.Ordinal);
+
+        // Real EANs from readings
+        var realEans = await db.EdcReadings
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .Select(x => new { x.Ean, x.IsProducer })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var labels = await db.TenantEans
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .ToDictionaryAsync(x => x.Ean, x => x.Label, cancellationToken);
+
+        var result = new List<PlannerEanDto>();
+
+        // Real EANs (exclude those already covered by synthetic)
+        foreach (var r in realEans.Where(x => !syntheticEanSet.Contains(x.Ean)))
+            result.Add(new PlannerEanDto(r.Ean, labels.GetValueOrDefault(r.Ean, r.Ean), r.IsProducer, false, null, null, null));
+
+        // Synthetic EANs
+        foreach (var s in syntheticEans)
+            result.Add(new PlannerEanDto(s.Ean, s.Label, s.IsProducer, true, s.InstalledKw, s.AnnualKwh, s.TdzCategory));
+
+        return result.OrderBy(x => x.IsProducer ? 0 : 1).ThenBy(x => x.Label).ToList();
+    }
+
+    public async Task UpsertSyntheticEanAsync(int tenantId, UpsertSyntheticEanRequest req, CancellationToken cancellationToken = default)
+    {
+        var existing = await db.SyntheticEans
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Ean == req.Ean, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        if (existing is not null)
+        {
+            existing.Label = req.Label;
+            existing.IsProducer = req.IsProducer;
+            existing.InstalledKw = req.InstalledKw;
+            existing.AnnualKwh = req.AnnualKwh;
+            existing.TdzCategory = req.TdzCategory;
+        }
+        else
+        {
+            db.SyntheticEans.Add(new SyntheticEan
+            {
+                TenantId = tenantId,
+                Ean = req.Ean,
+                Label = req.Label,
+                IsProducer = req.IsProducer,
+                InstalledKw = req.InstalledKw,
+                AnnualKwh = req.AnnualKwh,
+                TdzCategory = req.TdzCategory,
+                CreatedAt = now,
+            });
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteSyntheticEanAsync(int tenantId, string ean, CancellationToken cancellationToken = default)
+    {
+        var entity = await db.SyntheticEans
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Ean == ean, cancellationToken);
+        if (entity is not null)
+        {
+            db.SyntheticEans.Remove(entity);
+            // Also remove related priority links
+            var links = await db.PriorityLinks
+                .Where(x => x.TenantId == tenantId && (x.ProducerEan == ean || x.ConsumerEan == ean))
+                .ToListAsync(cancellationToken);
+            db.PriorityLinks.RemoveRange(links);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task<List<PriorityLinkDto>> GetPriorityLinksAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        var links = await db.PriorityLinks
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var labels = await db.TenantEans
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .ToDictionaryAsync(x => x.Ean, x => x.Label, cancellationToken);
+
+        var syntheticLabels = await db.SyntheticEans
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .ToDictionaryAsync(x => x.Ean, x => x.Label, cancellationToken);
+
+        string GetLabel(string ean) =>
+            labels.TryGetValue(ean, out var l) ? l :
+            syntheticLabels.TryGetValue(ean, out var sl) ? sl : ean;
+
+        return links.Select(lnk => new PriorityLinkDto(
+            lnk.ProducerEan, GetLabel(lnk.ProducerEan),
+            lnk.ConsumerEan, GetLabel(lnk.ConsumerEan),
+            lnk.CreatedAt)).ToList();
+    }
+
+    public async Task AddPriorityLinkAsync(int tenantId, string producerEan, string consumerEan, CancellationToken cancellationToken = default)
+    {
+        // Validate: consumer can have at most 5 linked producers
+        var existingCount = await db.PriorityLinks
+            .CountAsync(x => x.TenantId == tenantId && x.ConsumerEan == consumerEan, cancellationToken);
+        if (existingCount >= 5)
+            throw new InvalidOperationException($"Odběratel {consumerEan} už má 5 prioritních výroben (maximum dle pravidel EDC).");
+
+        var exists = await db.PriorityLinks.AnyAsync(
+            x => x.TenantId == tenantId && x.ProducerEan == producerEan && x.ConsumerEan == consumerEan,
+            cancellationToken);
+        if (!exists)
+        {
+            db.PriorityLinks.Add(new PriorityLink
+            {
+                TenantId = tenantId,
+                ProducerEan = producerEan,
+                ConsumerEan = consumerEan,
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task DeletePriorityLinkAsync(int tenantId, string producerEan, string consumerEan, CancellationToken cancellationToken = default)
+    {
+        var entity = await db.PriorityLinks.FirstOrDefaultAsync(
+            x => x.TenantId == tenantId && x.ProducerEan == producerEan && x.ConsumerEan == consumerEan,
+            cancellationToken);
+        if (entity is not null)
+        {
+            db.PriorityLinks.Remove(entity);
+            await db.SaveChangesAsync(cancellationToken);
         }
     }
 }

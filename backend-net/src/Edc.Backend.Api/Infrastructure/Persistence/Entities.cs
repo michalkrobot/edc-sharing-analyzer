@@ -113,6 +113,28 @@ public sealed class EdcReading
     public double KwhMissed { get; set; }
 }
 
+// Syntetický EAN – výrobna nebo odběratel bez reálných EDC dat (generuje se syntetický profil)
+public sealed class SyntheticEan
+{
+    public int TenantId { get; set; }
+    public string Ean { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public bool IsProducer { get; set; }
+    public double? InstalledKw { get; set; }   // FVE: instalovaný výkon v kWp
+    public double? AnnualKwh { get; set; }      // Odběratel: roční spotřeba v kWh
+    public string TdzCategory { get; set; } = string.Empty; // "fve" | "domacnost" | "mala_firma" | "stredni_firma" | "velka_firma"
+    public long CreatedAt { get; set; }
+}
+
+// Manuální priority link – výrobna preferenčně dodává konkrétnímu odběrateli
+public sealed class PriorityLink
+{
+    public int TenantId { get; set; }
+    public string ProducerEan { get; set; } = string.Empty;
+    public string ConsumerEan { get; set; } = string.Empty;
+    public long CreatedAt { get; set; }
+}
+
 // Skutecne sdileni mezi konkretnim vyrobcem a odberatelem za casovy interval (ze Sipka souboru)
 public sealed class EdcLinkReading
 {

@@ -15,8 +15,13 @@ COPY index.html \
      member-sharing.html \
      multi-ean-sharing.html \
      enerkom-report.html \
+     enerkom-report2.html \
+     allocation-planner.html \
+     backtest.html \
      multi-ean-analyzer.js \
      multi-ean-analyzer.css \
+     allocation-planner.js \
+     backtest.js \
      auth-client.js \
      auth-config.js \
      verify-app.js \
