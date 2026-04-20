@@ -14,12 +14,24 @@ public sealed class SmtpEmailSender(
 
     public async Task SendOtpAsync(string email, string code, int ttlMinutes, CancellationToken cancellationToken = default)
     {
-        var host = _options.Host?.Trim() ?? string.Empty;
+        var host = FirstNonEmpty(_options.Host, Environment.GetEnvironmentVariable("SMTP_HOST"));
+        var port = ParseIntOrDefault(Environment.GetEnvironmentVariable("SMTP_PORT"), _options.Port);
 
         // Supports both legacy keys (User/Pass/Secure) and requested keys (Username/Password/UseSsl).
-        var user = FirstNonEmpty(_options.Username, _options.User);
-        var pass = FirstNonEmpty(_options.Password, _options.Pass);
-        var secure = _options.UseSsl ?? _options.Secure;
+        var user = FirstNonEmpty(
+            _options.Username,
+            _options.User,
+            Environment.GetEnvironmentVariable("SMTP_USERNAME"),
+            Environment.GetEnvironmentVariable("SMTP_USER"));
+        var pass = FirstNonEmpty(
+            _options.Password,
+            _options.Pass,
+            Environment.GetEnvironmentVariable("SMTP_PASSWORD"),
+            Environment.GetEnvironmentVariable("SMTP_PASS"));
+        var secure = ParseBoolOrNull(Environment.GetEnvironmentVariable("SMTP_USE_SSL"))
+            ?? _options.UseSsl
+            ?? _options.Secure;
+        var from = FirstNonEmpty(_options.From, Environment.GetEnvironmentVariable("SMTP_FROM"));
 
         if (environment.IsDevelopment() && string.IsNullOrWhiteSpace(pass))
         {
@@ -35,7 +47,7 @@ public sealed class SmtpEmailSender(
         }
 
         var message = new MimeMessage();
-        message.From.Add(MailboxAddress.Parse(_options.From));
+        message.From.Add(MailboxAddress.Parse(from));
         message.To.Add(MailboxAddress.Parse(email));
         message.Subject = "EDC: jednorazovy prihlasovaci kod";
 
@@ -49,13 +61,28 @@ public sealed class SmtpEmailSender(
         }.ToMessageBody();
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(host, _options.Port, secure, cancellationToken);
+        await client.ConnectAsync(host, port, secure, cancellationToken);
         await client.AuthenticateAsync(user, pass, cancellationToken);
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);
     }
 
-    private static string FirstNonEmpty(params string[] values)
+    private static int ParseIntOrDefault(string? raw, int fallback)
+    {
+        return int.TryParse(raw, out var parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    private static bool? ParseBoolOrNull(string? raw)
+    {
+        if (bool.TryParse(raw, out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
     {
         foreach (var value in values)
         {

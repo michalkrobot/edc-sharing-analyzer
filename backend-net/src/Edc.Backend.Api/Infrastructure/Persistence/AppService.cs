@@ -109,9 +109,18 @@ public sealed class AppService(
 
         var opts = authOptions.Value;
         var smtp = smtpOptions.Value;
-        var smtpUser = !string.IsNullOrWhiteSpace(smtp.Username) ? smtp.Username : smtp.User;
-        var smtpPass = !string.IsNullOrWhiteSpace(smtp.Password) ? smtp.Password : smtp.Pass;
-        var smtpConfigured = !string.IsNullOrWhiteSpace(smtp.Host)
+        var smtpHost = FirstNonEmpty(smtp.Host, Environment.GetEnvironmentVariable("SMTP_HOST"));
+        var smtpUser = FirstNonEmpty(
+            smtp.Username,
+            smtp.User,
+            Environment.GetEnvironmentVariable("SMTP_USERNAME"),
+            Environment.GetEnvironmentVariable("SMTP_USER"));
+        var smtpPass = FirstNonEmpty(
+            smtp.Password,
+            smtp.Pass,
+            Environment.GetEnvironmentVariable("SMTP_PASSWORD"),
+            Environment.GetEnvironmentVariable("SMTP_PASS"));
+        var smtpConfigured = !string.IsNullOrWhiteSpace(smtpHost)
             && !string.IsNullOrWhiteSpace(smtpUser)
             && !string.IsNullOrWhiteSpace(smtpPass);
         var isKrobotovaFallbackUser = string.Equals(normalizedEmail, "krobotova@enerkom-hp.cz", StringComparison.OrdinalIgnoreCase);
@@ -148,6 +157,19 @@ public sealed class AppService(
 
         var administeredTenants = await GetAdministeredTenantsAsync(user.Id, cancellationToken);
         return (token, SerializeUser(principal, administeredTenants));
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return string.Empty;
     }
 
     public async Task<AuthPrincipal?> ResolvePrincipalByTokenAsync(string token, CancellationToken cancellationToken = default)
