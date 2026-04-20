@@ -25,9 +25,11 @@ public static class AuthEndpoints
         RequestOtpBody body,
         IAppService service,
         IEmailSender emailSender,
+        ILoggerFactory loggerFactory,
         IOptions<AuthOptions> authOptions,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("Auth.RequestOtp");
         var email = CsvUtils.NormalizeEmail(body?.Email);
         if (!CsvUtils.IsValidEmail(email))
         {
@@ -52,7 +54,17 @@ public static class AuthEndpoints
         var expiresAt = now + ttlMinutes * 60 * 1000;
 
         await service.CreateOtpAsync(user.Id, email, code, expiresAt, now, cancellationToken);
-        await emailSender.SendOtpAsync(email, code, ttlMinutes, cancellationToken);
+        try
+        {
+            await emailSender.SendOtpAsync(email, code, ttlMinutes, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "OTP email send failed for {Email}", email);
+            return Results.Json(
+                new { error = "Nepodarilo se odeslat prihlasovaci e-mail. Zkuste to prosim znovu pozdeji." },
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
 
         return Results.Ok(new { message = "Kod byl odeslan na e-mail.", ttlMinutes });
     }
