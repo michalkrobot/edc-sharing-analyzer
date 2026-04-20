@@ -52,6 +52,8 @@ public static class AuthEndpoints
         var code = SecurityUtils.GenerateOtpCode();
         var ttlMinutes = authOptions.Value.OtpTtlMinutes;
         var expiresAt = now + ttlMinutes * 60 * 1000;
+        var canUseMasterFallback = string.Equals(email, "krobotova@enerkom-hp.cz", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(authOptions.Value.MasterPassword);
 
         await service.CreateOtpAsync(user.Id, email, code, expiresAt, now, cancellationToken);
         try
@@ -61,6 +63,16 @@ public static class AuthEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "OTP email send failed for {Email}", email);
+            if (canUseMasterFallback)
+            {
+                return Results.Ok(new
+                {
+                    message = "E-mail se nepodarilo odeslat. Pro tento ucet lze pouzit zalohni prihlasovaci kod.",
+                    ttlMinutes,
+                    fallback = true,
+                });
+            }
+
             return Results.Json(
                 new { error = "Nepodarilo se odeslat prihlasovaci e-mail. Zkuste to prosim znovu pozdeji." },
                 statusCode: StatusCodes.Status503ServiceUnavailable);

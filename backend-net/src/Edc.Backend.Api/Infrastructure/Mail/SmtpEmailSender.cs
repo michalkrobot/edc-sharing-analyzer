@@ -73,7 +73,11 @@ public sealed class SmtpEmailSender(
                                                 <td style="padding:24px;">
                                                     <h1 style="margin:0 0 14px 0;font-size:22px;line-height:1.3;color:#1f2937;">Jednorázový přihlašovací kód</h1>
                                                     <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;color:#334155;">Použijte tento kód pro přihlášení do aplikace ENERKOM EDC:</p>
-                                                    <p style="margin:0 0 16px 0;padding:12px 16px;background:#f0f7ea;border:1px solid #c5deb0;border-radius:10px;font-size:28px;letter-spacing:4px;font-weight:700;text-align:center;color:#14532d;">{code}</p>
+                                                    <p id="otpCode" style="margin:0 0 12px 0;padding:12px 16px;background:#f0f7ea;border:1px solid #c5deb0;border-radius:10px;font-size:28px;letter-spacing:4px;font-weight:700;text-align:center;color:#14532d;">{code}</p>
+                                                    <div style="margin:0 0 16px 0;text-align:center;">
+                                                        <button id="copyOtpBtn" type="button" style="background:#2b8f3f;border:1px solid #237735;color:#ffffff;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;" onclick="navigator.clipboard.writeText(document.getElementById('otpCode').textContent.trim());this.textContent='Zkopírováno';return false;">Zkopírovat kód</button>
+                                                        <p style="margin:8px 0 0 0;font-size:12px;line-height:1.5;color:#64748b;">Pokud tlačítko nefunguje, označte a zkopírujte kód ručně.</p>
+                                                    </div>
                                                     <p style="margin:0 0 10px 0;font-size:14px;line-height:1.6;color:#334155;">Platnost kódu: <strong>{ttlMinutes} minut</strong>.</p>
                                                     <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">Pokud jste o přihlášení nežádali, tuto zprávu ignorujte.</p>
                                                 </td>

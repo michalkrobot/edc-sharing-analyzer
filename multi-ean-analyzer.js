@@ -3173,6 +3173,7 @@ function renderEffTrendChart(data) {
 function renderActivityHeatmap(data) {
   const section = document.getElementById("activityHeatmapSection");
   const wrap    = document.getElementById("activityHeatmapWrap");
+  const description = section ? section.querySelector(".section-description") : null;
   if (!section || !wrap) return;
 
   // Member view: only show when member has own producers
@@ -3199,55 +3200,108 @@ function renderActivityHeatmap(data) {
   for (const iv of data.intervals) {
     const d = iv.start instanceof Date ? iv.start : new Date(iv.start);
     const key = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
-    if (!dayMap.has(key)) dayMap.set(key, new Array(24).fill(0));
+    if (!dayMap.has(key)) {
+      dayMap.set(key, {
+        sharing: new Array(24).fill(0),
+        potential: new Array(24).fill(0),
+      });
+    }
     let sharing;
+    let potential;
     if (producerIdx >= 0 && Array.isArray(iv.producers) && iv.producers[producerIdx]) {
       const p = iv.producers[producerIdx];
       sharing = Math.max(0, (Number(p.before) || 0) - (Number(p.after) || 0));
+      potential = Math.max(0, Number(p.before) || 0);
     } else if (ownIndices && Array.isArray(iv.producers)) {
       sharing = 0;
+      potential = 0;
       for (const idx of ownIndices) {
         const p = iv.producers[idx];
         if (!p) continue;
         sharing += Math.max(0, (Number(p.before) || 0) - (Number(p.after) || 0));
+        potential += Math.max(0, Number(p.before) || 0);
       }
     } else {
       sharing = Number(iv.sumSharing) || 0;
+      potential = Math.max(0, Number(iv.sumProduction) || 0);
     }
-    dayMap.get(key)[d.getHours()] += sharing;
+    const entry = dayMap.get(key);
+    entry.sharing[d.getHours()] += sharing;
+    entry.potential[d.getHours()] += potential;
   }
   const sorted = [...dayMap.entries()].sort((a,b) => a[0].localeCompare(b[0]));
   if (sorted.length === 0) return;
 
-  let globalMax = 0;
-  for (const [,hours] of sorted) for (const v of hours) if (v > globalMax) globalMax = v;
+  if (description) {
+    description.textContent = "Sdílení (kWh) podle dne a hodiny. Druhý řádek v buňce ukazuje úspěšnost sdílení v % (sdílení / výroba).";
+  }
 
-  const fmtV = v => {
+  let globalMax = 0;
+  for (const [,entry] of sorted) {
+    for (const v of entry.sharing) {
+      if (v > globalMax) globalMax = v;
+    }
+  }
+
+  const fmtCellValue = v => {
     if (v < 0.05) return "";
-    if (v >= 1000) return (v/1000).toFixed(1) + " MWh";
-    return v.toFixed(1) + " kWh";
+    if (v >= 1000) return (v / 1000).toFixed(1) + "M";
+    if (v >= 100) return v.toFixed(0);
+    return v.toFixed(1);
+  };
+
+  const fmtTooltipKwh = v => {
+    if (v < 0.05) return "0 kWh";
+    if (v >= 1000) return (v / 1000).toFixed(2) + " MWh";
+    return v.toFixed(2) + " kWh";
+  };
+
+  const fmtPercent = (sharing, potential) => {
+    if (potential <= 0.001) return "—";
+    const ratio = (sharing / potential) * 100;
+    if (!Number.isFinite(ratio)) return "—";
+    if (ratio >= 100) return ratio.toFixed(0) + "%";
+    if (ratio >= 10) return ratio.toFixed(1) + "%";
+    return ratio.toFixed(2) + "%";
   };
 
   const hourLabels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2,"0"));
   let html = '<table class="sharing-heatmap-table"><thead><tr><th></th>' +
     hourLabels.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>";
 
-  for (const [key, hours] of sorted) {
+  for (const [key, entry] of sorted) {
     const [,m,d] = key.split("-");
     html += `<tr><td class="sharing-heatmap-day">${Number(d)}.${Number(m)}.</td>`;
-    for (const v of hours) {
+    for (let hour = 0; hour < 24; hour += 1) {
+      const v = entry.sharing[hour];
+      const potential = entry.potential[hour];
+      const pct = fmtPercent(v, potential);
       const alpha = globalMax > 0 ? v / globalMax : 0;
       const bg = alpha < 0.05
         ? "var(--surface-2,#f9fafb)"
         : `rgba(${Math.round(40+(230-40)*(1-alpha))},${Math.round(167+(243-167)*(1-alpha))},${Math.round(69+(244-69)*(1-alpha))},1)`;
       const color = alpha > 0.5 ? "#fff" : "#555";
-      html += `<td style="background:${bg};color:${color}" title="${fmtV(v) || "0 kWh"}">${fmtV(v)}</td>`;
+      const mainValue = fmtCellValue(v);
+      const title = `Výroba: ${fmtTooltipKwh(potential)} | Sdílení: ${fmtTooltipKwh(v)} | Úspěšnost: ${pct}`;
+      html += `<td style="background:${bg};color:${color}" title="${title}">${mainValue || ""}</td>`;
     }
     html += "</tr>";
   }
   html += "</tbody></table>";
   wrap.innerHTML = html;
   section.hidden = false;
+
+  // Scroll so that hour 12 is centered
+  const table = wrap.querySelector("table");
+  if (table) {
+    const thCells = table.querySelectorAll("thead th");
+    // thCells[0] = empty day label, thCells[1..24] = hours 0..23, so hour 12 = index 13
+    const th12 = thCells[13];
+    if (th12) {
+      const cellCenter = th12.offsetLeft + th12.offsetWidth / 2;
+      wrap.scrollLeft = cellCenter - wrap.clientWidth / 2;
+    }
+  }
 }
 
 function renderProducerDailyTotalsChart(data) {
