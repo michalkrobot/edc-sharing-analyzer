@@ -180,9 +180,18 @@ public sealed class EdcScraperHostedService(
                 }
                 else if (report.Kind == EdcPortalScraper.ReportKind.SipkaCron)
                 {
-                    await appService.SaveEdcLinkImportAsync(report.CsvText, report.Filename, auth, tenantId.ToString(), cancellationToken);
-                    await appService.LogEdcImportAsync(tenantId, report.Filename, reportKind, recordCount, "success", null, cancellationToken);
-                    logger.LogInformation("EDC scraper: Sipka-cron importován pro tenant {TenantId}.", tenantId);
+                    try
+                    {
+                        await appService.SaveEdcLinkImportAsync(report.CsvText, report.Filename, auth, tenantId.ToString(), cancellationToken);
+                        await appService.LogEdcImportAsync(tenantId, report.Filename, reportKind, recordCount, "success", null, cancellationToken);
+                        logger.LogInformation("EDC scraper: Sipka-cron importován pro tenant {TenantId}.", tenantId);
+                    }
+                    catch (InvalidOperationException ex) when (IsEmptyLinkCsvError(ex))
+                    {
+                        // U některých dní EDC vrací prázdné CSV vazeb; to je validní stav, ne chyba importu.
+                        await appService.LogEdcImportAsync(tenantId, report.Filename, reportKind, 0, "success", "Prázdné CSV vazeb - bez dat pro daný den.", cancellationToken);
+                        logger.LogWarning("EDC scraper: Sipka-cron soubor {Filename} je prázdný pro tenant {TenantId}; import označen jako úspěšný bez dat. Detail: {Message}", report.Filename, tenantId, ex.Message);
+                    }
                 }
             }
             catch (Exception ex)
@@ -192,5 +201,12 @@ public sealed class EdcScraperHostedService(
                 logger.LogError(ex, "EDC scraper: chyba při importu souboru {Filename} pro tenant {TenantId}.", report.Filename, tenantId);
             }
         }
+    }
+
+    private static bool IsEmptyLinkCsvError(InvalidOperationException ex)
+    {
+        var message = ex.Message ?? string.Empty;
+        return message.Contains("CSV vazeb je prazdne", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("CSV vazeb neobsahuje platne intervaly", StringComparison.OrdinalIgnoreCase);
     }
 }

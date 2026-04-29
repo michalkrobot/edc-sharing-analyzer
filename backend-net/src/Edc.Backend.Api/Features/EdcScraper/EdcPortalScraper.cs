@@ -77,7 +77,53 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
         }
         finally
         {
+            await BestEffortLogoutAsync(page);
             await context.CloseAsync();
+        }
+    }
+
+    private async Task BestEffortLogoutAsync(IPage page)
+    {
+        try
+        {
+            if (!page.Url.StartsWith(PortalBaseUrl, StringComparison.OrdinalIgnoreCase) &&
+                !page.Url.Contains("sso.portal.edc-cr.cz", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var logoutTargets = new[]
+            {
+                page.GetByText("Odhlásit").First,
+                page.Locator("a:has-text('Odhlásit'), button:has-text('Odhlásit'), [role='button']:has-text('Odhlásit')").First,
+                page.Locator("a[href*='logout'], button[aria-label*='Odhlásit'], a[aria-label*='Odhlásit']").First,
+            };
+
+            foreach (var target in logoutTargets)
+            {
+                try
+                {
+                    if (!await target.IsVisibleAsync())
+                    {
+                        continue;
+                    }
+
+                    await target.ClickAsync(new LocatorClickOptions { Timeout = 10_000, Force = true });
+                    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new PageWaitForLoadStateOptions { Timeout = 10_000 });
+                    logger.LogInformation("EDC scraper: uživatel byl odhlášen.");
+                    return;
+                }
+                catch
+                {
+                    // Zkusíme další logout variantu.
+                }
+            }
+
+            logger.LogWarning("EDC scraper: nepodařilo se dohledat viditelnou akci Odhlásit, končím zavřením session contextu.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "EDC scraper: logout selhal, session bude ukončena zavřením browser contextu.");
         }
     }
 
@@ -235,6 +281,11 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
             "a[title*='Stáhnout']",
             "button[mattooltip*='Stáhnout']",
             "a[mattooltip*='Stáhnout']",
+            "[role='button']:has-text('Stáhnout')",
+            "[role='link']:has-text('Stáhnout')",
+            "td:has-text('Stáhnout')",
+            "div:has-text('Stáhnout')",
+            "span:has-text('Stáhnout')",
         };
 
         foreach (var selector in directSelectors)
@@ -252,13 +303,45 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
                 try
                 {
                     var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = 30_000 });
-                    await target.ClickAsync(new LocatorClickOptions { Timeout = 30_000 });
+                    await target.ClickAsync(new LocatorClickOptions { Timeout = 30_000, Force = true });
                     return await downloadTask;
                 }
                 catch
                 {
                     // Zkusime dalsi mozny prvek.
                 }
+            }
+        }
+
+        // Fallback: textovy locator v ramci radku, pokud UI renderuje akci jako obecny textovy element.
+        var textTarget = row.GetByText("Stáhnout").First;
+        if (await textTarget.IsVisibleAsync())
+        {
+            try
+            {
+                var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = 30_000 });
+                await textTarget.ClickAsync(new LocatorClickOptions { Timeout = 30_000, Force = true });
+                return await downloadTask;
+            }
+            catch
+            {
+                // Pokracujeme do dalsi fallback varianty.
+            }
+        }
+
+        // Fallback: posledni bunka v radku typicky odpovida sloupci Akce.
+        var actionCell = row.Locator("td, [role='cell'], mat-cell").Last;
+        if (await actionCell.IsVisibleAsync())
+        {
+            try
+            {
+                var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = 30_000 });
+                await actionCell.ClickAsync(new LocatorClickOptions { Timeout = 30_000, Force = true });
+                return await downloadTask;
+            }
+            catch
+            {
+                // Pokud ani klik na bunku nic neudela, zalogujeme detail radku.
             }
         }
 
@@ -288,6 +371,8 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
             }
         }
 
+        var rowHtml = await row.InnerHTMLAsync();
+        logger.LogWarning("EDC scraper: radek {Prefix} (index {Index}) nema dostupnou akci Stahnout. HTML: {Html}", reportPrefix, rowIndex, rowHtml);
         logger.LogWarning("EDC scraper: radek {Prefix} (index {Index}) nema dostupnou akci Stahnout", reportPrefix, rowIndex);
         return null;
     }
