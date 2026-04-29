@@ -204,6 +204,13 @@
           <span class="sharing-section-chip">Denní maximum</span>
         </div>
         <p class="section-description">Den s nejvyšší výrobou a sdílením pro tvoje výrobny.</p>
+        <div class="chart-controls member-best-day-controls">
+          <label class="time-range-field" for="bestDayDateInput">
+            Datum
+            <input id="bestDayDateInput" type="date" />
+          </label>
+          <button id="bestDayResetBtn" type="button" class="btn btn-ghost">Nejlepší den</button>
+        </div>
         <div id="bestDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 
@@ -240,6 +247,13 @@
           <span class="sharing-section-chip">Denní maximum</span>
         </div>
         <p class="section-description">Den s nejvyšší dodávkou ze sdílení pro tvoje odběrná místa.</p>
+        <div class="chart-controls member-best-day-controls">
+          <label class="time-range-field" for="consumerBestDayDateInput">
+            Datum
+            <input id="consumerBestDayDateInput" type="date" />
+          </label>
+          <button id="consumerBestDayResetBtn" type="button" class="btn btn-ghost">Nejlepší den</button>
+        </div>
         <div id="consumerBestDayChart" class="chart-canvas chart-canvas-wide"></div>
       </section>
 

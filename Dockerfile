@@ -45,6 +45,7 @@ COPY index.html \
      multi-ean-analyzer.html \
      member-sharing.html \
      multi-ean-sharing.html \
+    tenant-admin.html \
      enerkom-report.html \
      enerkom-report2.html \
      allocation-planner.html \

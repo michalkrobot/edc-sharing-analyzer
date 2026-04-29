@@ -63,6 +63,10 @@
     return Boolean(authUser && authUser.role === "global_admin");
   }
 
+  function isAuthenticatedUser() {
+    return Boolean(authToken && authUser);
+  }
+
   function isSimulationPage() {
     return Boolean(document.body && document.body.dataset.page === "simulation");
   }
@@ -75,9 +79,13 @@
     return Boolean(document.body && ["sharing", "simulation"].includes(document.body.dataset.page));
   }
 
+  function isAdminSettingsPage() {
+    return Boolean(document.body && document.body.dataset.page === "tenant-admin");
+  }
+
   function buildSharedNavigation() {
     const currentPage = document.body && document.body.dataset.page ? document.body.dataset.page : "home";
-    return [
+    const allItems = [
       {
         href: "index.html",
         label: "Rozcestník",
@@ -98,7 +106,28 @@
         label: "Simulace",
         page: "simulation",
       },
-    ].map((item) => ({
+      {
+        href: "tenant-admin.html",
+        label: "Administrace",
+        page: "tenant-admin",
+        adminOnly: true,
+      },
+    ];
+
+    let visiblePages;
+    if (!isAuthenticatedUser()) {
+      visiblePages = new Set(["home"]);
+    } else if (!isAdminUser()) {
+      visiblePages = new Set(["home", "member-sharing"]);
+    } else {
+      visiblePages = null;
+    }
+
+    const visibleItems = visiblePages
+      ? allItems.filter((item) => visiblePages.has(item.page))
+      : allItems;
+
+    return visibleItems.map((item) => ({
       ...item,
       isActive: item.page === currentPage,
     }));
@@ -124,6 +153,9 @@
       link.textContent = item.label;
       if (item.globalAdminOnly) {
         link.setAttribute("data-global-admin-only", "");
+      }
+      if (item.adminOnly) {
+        link.setAttribute("data-admin-only", "");
       }
       nav.appendChild(link);
     });
@@ -263,10 +295,14 @@
     openLoginOverlay();
   }
 
-  function applyGlobalAdminOnlyVisibility() {
-    const shouldShow = isGlobalAdminUser();
+  function applyRoleBasedVisibility() {
+    const shouldShowGlobalAdmin = isGlobalAdminUser();
+    const shouldShowAdmin = isAdminUser();
     document.querySelectorAll("[data-global-admin-only]").forEach((element) => {
-      element.hidden = !shouldShow;
+      element.hidden = !shouldShowGlobalAdmin;
+    });
+    document.querySelectorAll("[data-admin-only]").forEach((element) => {
+      element.hidden = !shouldShowAdmin;
     });
   }
 
@@ -357,21 +393,19 @@
       return;
     }
 
-    if (!settingsBtn) {
-      settingsBtn = document.createElement("button");
-      settingsBtn.id = "authAdminSettingsBtn";
-      settingsBtn.type = "button";
-      settingsBtn.className = "btn btn-secondary auth-settings-btn";
-      settingsBtn.textContent = "Nastavení";
-      settingsBtn.addEventListener("click", () => {
-        const section = ensureAdminSettingsSection();
-        section.hidden = false;
-        section.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-      widget.insertBefore(settingsBtn, document.getElementById("authLogoutBtn"));
+    if (settingsBtn) {
+      settingsBtn.remove();
+      settingsBtn = null;
     }
 
-    ensureAdminSettingsSection();
+    if (isAdminSettingsPage()) {
+      ensureAdminSettingsSection();
+    } else {
+      const adminSection = document.getElementById("adminSettingsSection");
+      if (adminSection) {
+        adminSection.remove();
+      }
+    }
   }
 
   async function readTextFileWithFallback(file) {
@@ -381,6 +415,40 @@
     } catch {
       return new TextDecoder("windows-1250").decode(buffer);
     }
+  }
+
+  function setupAdminTabs(section) {
+    if (!section) {
+      return;
+    }
+
+    const tabButtons = Array.from(section.querySelectorAll("[data-admin-tab-target]"));
+    const tabPanels = Array.from(section.querySelectorAll("[data-admin-tab-panel]"));
+    if (tabButtons.length === 0 || tabPanels.length === 0) {
+      return;
+    }
+
+    const activateTab = (tabName) => {
+      tabButtons.forEach((button) => {
+        const isActive = button.getAttribute("data-admin-tab-target") === tabName;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+        button.setAttribute("tabindex", isActive ? "0" : "-1");
+      });
+
+      tabPanels.forEach((panel) => {
+        const isActive = panel.getAttribute("data-admin-tab-panel") === tabName;
+        panel.hidden = !isActive;
+      });
+    };
+
+    tabButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        activateTab(button.getAttribute("data-admin-tab-target") || "members");
+      });
+    });
+
+    activateTab("members");
   }
 
   function ensureAdminSettingsSection() {
@@ -397,12 +465,87 @@
     section = document.createElement("section");
     section.id = "adminSettingsSection";
     section.className = "card admin-settings-card";
-    section.hidden = true;
-    section.innerHTML = `<div class='admin-settings-head'><div><p class='landing-section-kicker'>Administrace</p><h2>Nastavení</h2></div><button id='adminSettingsCloseBtn' type='button' class='btn btn-ghost'>Zavřít</button></div><p class='section-description'>Pouze administrátor může importovat EDC data, databázi členů, EAN vazby a přesné vazby výrobna → odběr. Vazba uživatel ↔ EAN vzniká podle sloupce jméno člena.</p><div id='adminTenantScopeWrap' class='admin-tenant-scope' hidden><label class='admin-import-field'>Aktivní tenant<select id='adminTenantSelect'></select></label></div><div id='adminSharingFlowModeWrap' class='admin-sharing-flow-card' hidden><div><h3>Režim toku sdílení</h3><p class='section-description'>Tenant admin může přepnout, zda se mají v přehledech použít přesné vazby, nebo jen odhad z hlavního EDC exportu.</p></div><label class='admin-import-field'>Použití přesných vazeb<select id='adminSharingFlowModeSelect'><option value='auto'>Automaticky: použít přesná data, když existují</option><option value='exact'>Vynutit přesná data</option><option value='estimate'>Vynutit odhad</option></select></label></div><div class='admin-members-card'><div class='admin-members-head'><h3>EDC data</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Soubor EDC exportu<input id='adminEdcFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcBtn' type='button' class='btn btn-primary'>Importovat EDC data</button></div><div class='admin-import-card'><label class='admin-import-field'>Soubor přesných vazeb (šipky)<input id='adminEdcLinksFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcLinksBtn' type='button' class='btn btn-primary'>Importovat přesné vazby</button></div><p id='adminEdcImportStatus' class='auth-status'></p><div id='adminEdcImportDetails' class='admin-members-empty'></div></div><div class='admin-import-card'><label class='admin-import-field'>Soubor členů (clenove.csv)<input id='adminMembersFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportMembersBtn' type='button' class='btn btn-primary'>Importovat členy</button></div><p id='adminImportStatus' class='auth-status'></p><div class='admin-import-card'><label class='admin-import-field'>Soubor EAN (eany.csv)<input id='adminEansFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEansBtn' type='button' class='btn btn-primary'>Importovat EAN</button></div><p id='adminEansImportStatus' class='auth-status'></p><div id='adminEansImportDetails' class='admin-members-empty'></div><div id='globalTenantManagement' class='admin-members-card' hidden><div class='admin-members-head'><h3>Tenanti</h3><button id='adminTenantNewBtn' type='button' class='btn btn-ghost'>Nový tenant</button></div><div id='adminTenantsList' class='admin-members-list'></div><div class='admin-import-card'><label class='admin-import-field'>Název tenanta<input id='adminTenantNameInput' type='text' placeholder='Např. Enerkom horní pomoraví' /></label><label class='admin-import-field'>Admini (e-maily oddělené čárkou)<input id='adminTenantAdminsInput' type='text' placeholder='admin1@firma.cz, admin2@firma.cz' /></label><button id='adminTenantSaveBtn' type='button' class='btn btn-primary'>Uložit tenant</button></div><p id='adminTenantStatus' class='auth-status'></p></div><div class='admin-members-card'><div class='admin-members-head'><h3>Importovaní členové</h3><button id='adminReloadMembersBtn' type='button' class='btn btn-ghost'>Obnovit seznam</button></div><div id='adminMembersList' class='admin-members-list'></div></div></section>`;
-    appShell.insertBefore(section, appShell.firstElementChild ? appShell.firstElementChild.nextElementSibling || appShell.lastElementChild : null);
-    section.insertAdjacentHTML("beforeend", "<div class='admin-members-card'><div class='admin-members-head'><h3>Přihlašovací údaje EDC</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>EDC e-mail<input id='adminEdcCredentialEmailInput' type='text' placeholder='user@example.cz' /></label><label class='admin-import-field'>EDC heslo<input id='adminEdcCredentialPasswordInput' type='password' placeholder='••••••••' /></label><button id='adminSaveEdcCredentialBtn' type='button' class='btn btn-primary'>Uložit údaje</button><button id='adminDeleteEdcCredentialBtn' type='button' class='btn btn-ghost'>Smazat údaje</button></div><p id='adminEdcCredentialStatus' class='auth-status'></p><div id='adminEdcCredentialInfo' class='admin-members-empty'></div></div><div class='admin-members-card'><div class='admin-members-head'><h3>Ruční import EDC</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Datum reportu<input id='adminEdcTriggerDateInput' type='date' /></label><button id='adminTriggerEdcScrapeBtn' type='button' class='btn btn-primary'>Spustit import</button></div><p id='adminEdcTriggerStatus' class='auth-status'></p></div><div class='admin-members-card'><div class='admin-members-head'><h3>Historie importů EDC</h3><button id='adminReloadEdcHistoryBtn' type='button' class='btn btn-ghost'>Obnovit historii</button></div><div id='adminEdcHistoryWrap' class='admin-members-empty'></div></div>");
+    section.hidden = false;
+    section.innerHTML = `
+      <div class='admin-settings-head'>
+        <div>
+          <p class='landing-section-kicker'>Administrace</p>
+          <h2>Nastavení tenanta</h2>
+        </div>
+      </div>
+      <p class='section-description'>Nastavení je rozdělené do sekcí podle agendy. Nejprve zvol tenant, potom pokračuj přes záložky Správa členů a EDC.</p>
+      <div id='adminTenantScopeWrap' class='admin-tenant-scope' hidden>
+        <label class='admin-import-field'>Aktivní tenant<select id='adminTenantSelect'></select></label>
+      </div>
 
-    const closeBtn = document.getElementById("adminSettingsCloseBtn");
+      <div class='admin-tabs' role='tablist' aria-label='Sekce tenant administrace'>
+        <button id='adminMembersTab' type='button' class='admin-tab-btn is-active' role='tab' aria-selected='true' aria-controls='adminMembersPanel' data-admin-tab-target='members'>Správa členů</button>
+        <button id='adminEdcTab' type='button' class='admin-tab-btn' role='tab' aria-selected='false' aria-controls='adminEdcPanel' data-admin-tab-target='edc' tabindex='-1'>EDC</button>
+      </div>
+
+      <section id='adminMembersPanel' class='admin-tab-panel' role='tabpanel' aria-labelledby='adminMembersTab' data-admin-tab-panel='members'>
+        <div class='admin-members-card'>
+          <div class='admin-members-head'><h3>Import členů</h3></div>
+          <div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Soubor členů (clenove.csv)<input id='adminMembersFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportMembersBtn' type='button' class='btn btn-primary'>Importovat členy</button></div>
+          <p id='adminImportStatus' class='auth-status'></p>
+          <div class='admin-import-card'><label class='admin-import-field'>Soubor EAN (eany.csv)<input id='adminEansFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEansBtn' type='button' class='btn btn-primary'>Importovat EAN</button></div>
+          <p id='adminEansImportStatus' class='auth-status'></p>
+          <div id='adminEansImportDetails' class='admin-members-empty'></div>
+        </div>
+
+        <div id='globalTenantManagement' class='admin-members-card' hidden>
+          <div class='admin-members-head'><h3>Tenanti</h3><button id='adminTenantNewBtn' type='button' class='btn btn-ghost'>Nový tenant</button></div>
+          <div id='adminTenantsList' class='admin-members-list'></div>
+          <div class='admin-import-card'><label class='admin-import-field'>Název tenanta<input id='adminTenantNameInput' type='text' placeholder='Např. Enerkom horní pomoraví' /></label><label class='admin-import-field'>Admini (e-maily oddělené čárkou)<input id='adminTenantAdminsInput' type='text' placeholder='admin1@firma.cz, admin2@firma.cz' /></label><button id='adminTenantSaveBtn' type='button' class='btn btn-primary'>Uložit tenant</button></div>
+          <p id='adminTenantStatus' class='auth-status'></p>
+        </div>
+
+        <div class='admin-members-card'>
+          <div class='admin-members-head'><h3>Importovaní členové</h3><button id='adminReloadMembersBtn' type='button' class='btn btn-ghost'>Obnovit seznam</button></div>
+          <div id='adminMembersList' class='admin-members-list'></div>
+        </div>
+      </section>
+
+      <section id='adminEdcPanel' class='admin-tab-panel' role='tabpanel' aria-labelledby='adminEdcTab' data-admin-tab-panel='edc' hidden>
+        <div id='adminSharingFlowModeWrap' class='admin-sharing-flow-card' hidden>
+          <div><h3>Režim toku sdílení</h3><p class='section-description'>Tenant admin může přepnout, zda se mají v přehledech použít přesné vazby, nebo jen odhad z hlavního EDC exportu.</p></div>
+          <label class='admin-import-field'>Použití přesných vazeb<select id='adminSharingFlowModeSelect'><option value='auto'>Automaticky: použít přesná data, když existují</option><option value='exact'>Vynutit přesná data</option><option value='estimate'>Vynutit odhad</option></select></label>
+        </div>
+
+        <div class='admin-members-card'>
+          <div class='admin-members-head'><h3>EDC data</h3></div>
+          <div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Soubor EDC exportu<input id='adminEdcFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcBtn' type='button' class='btn btn-primary'>Importovat EDC data</button></div>
+          <div class='admin-import-card'><label class='admin-import-field'>Soubor přesných vazeb (šipky)<input id='adminEdcLinksFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcLinksBtn' type='button' class='btn btn-primary'>Importovat přesné vazby</button></div>
+          <p id='adminEdcImportStatus' class='auth-status'></p>
+          <div id='adminEdcImportDetails' class='admin-members-empty'></div>
+        </div>
+
+        <div class='admin-members-card'>
+          <div class='admin-members-head'><h3>Přihlašovací údaje EDC</h3></div>
+          <div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>EDC e-mail<input id='adminEdcCredentialEmailInput' type='text' placeholder='user@example.cz' /></label><label class='admin-import-field'>EDC heslo<input id='adminEdcCredentialPasswordInput' type='password' placeholder='••••••••' /></label><button id='adminSaveEdcCredentialBtn' type='button' class='btn btn-primary'>Uložit údaje</button><button id='adminDeleteEdcCredentialBtn' type='button' class='btn btn-ghost'>Smazat údaje</button></div>
+          <p id='adminEdcCredentialStatus' class='auth-status'></p>
+          <div id='adminEdcCredentialInfo' class='admin-members-empty'></div>
+        </div>
+
+        <div class='admin-members-card'>
+          <div class='admin-members-head'><h3>Ruční import EDC</h3></div>
+          <div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Datum reportu<input id='adminEdcTriggerDateInput' type='date' /></label><button id='adminTriggerEdcScrapeBtn' type='button' class='btn btn-primary'>Spustit import</button></div>
+          <p id='adminEdcTriggerStatus' class='auth-status'></p>
+        </div>
+
+        <div class='admin-members-card'>
+          <div class='admin-members-head'><h3>Historie importů EDC</h3><button id='adminReloadEdcHistoryBtn' type='button' class='btn btn-ghost'>Obnovit historii</button></div>
+          <div id='adminEdcHistoryWrap' class='admin-members-empty'></div>
+        </div>
+      </section>
+    `;
+    const adminMount = document.getElementById("adminSettingsMount");
+    if (adminMount) {
+      adminMount.replaceChildren(section);
+    } else {
+      appShell.insertBefore(section, appShell.firstElementChild ? appShell.firstElementChild.nextElementSibling || appShell.lastElementChild : null);
+    }
+
     const edcFileInput = document.getElementById("adminEdcFileInput");
     const importEdcBtn = document.getElementById("adminImportEdcBtn");
     const edcLinksFileInput = document.getElementById("adminEdcLinksFileInput");
@@ -467,11 +610,7 @@
       });
     }
 
-    if (closeBtn) {
-      closeBtn.addEventListener("click", () => {
-        section.hidden = true;
-      });
-    }
+    setupAdminTabs(section);
 
     if (importEdcBtn && edcFileInput && edcStatus) {
       importEdcBtn.addEventListener("click", async () => {
@@ -1251,12 +1390,25 @@
     return fallback;
   }
 
+  function enforceAdminSettingsAccess() {
+    if (!isAdminSettingsPage()) {
+      return;
+    }
+    if (isAdminUser()) {
+      return;
+    }
+    window.location.replace("index.html");
+  }
+
   function emitAuthStateChanged() {
-    applyGlobalAdminOnlyVisibility();
+    renderSharedNavigation();
+    applyRoleBasedVisibility();
     enforceGlobalAdminSimulationAccess();
+    enforceAdminSettingsAccess();
     enforceMemberSharingAuth();
     loadMembersForAdminFilter();
     loadSharingGroupsForAdmin();
+
     window.dispatchEvent(new CustomEvent("edc-auth-state", {
       detail: {
         isAuthenticated: Boolean(authToken),
@@ -1336,14 +1488,15 @@
   async function initAuth() {
     if (!AUTH_REQUIRED) {
       upsertHeaderAuth("");
-      applyGlobalAdminOnlyVisibility();
+      applyRoleBasedVisibility();
       enforceGlobalAdminSimulationAccess();
+      enforceAdminSettingsAccess();
       setAuthLock(false);
       return;
     }
 
     upsertHeaderAuth("");
-    applyGlobalAdminOnlyVisibility();
+    applyRoleBasedVisibility();
     const hasValidSession = await validateSession();
     if (hasValidSession) {
       finalizeAuthenticated();
@@ -1352,6 +1505,7 @@
 
     closeLoginOverlay();
     upsertHeaderAuth("");
+    enforceAdminSettingsAccess();
     enforceMemberSharingAuth();
     enforceGlobalAdminSimulationAccess();
   }
@@ -1543,7 +1697,7 @@
     renderSharedNavigation();
     renderHomeHeroActions();
     renderHomeLandingCards();
-    applyGlobalAdminOnlyVisibility();
+    applyRoleBasedVisibility();
     setupMemberFilterListener();
     setupSharingGroupListener();
     initAuth();

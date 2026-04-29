@@ -424,8 +424,9 @@ function renderHeatmap(intervals) {
     if (!dayMap.has(key)) dayMap.set(key, new Array(24).fill(0));
     dayMap.get(key)[d.getHours()] += Number(iv.sumSharing) || 0;
   }
-  const sorted = [...dayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  if (sorted.length === 0) return;
+  const sortedAsc = [...dayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  if (sortedAsc.length === 0) return;
+  const sorted = sortedAsc.slice(-20).reverse();
 
   let globalMax = 0;
   for (const [, hours] of sorted) for (const v of hours) if (v > globalMax) globalMax = v;

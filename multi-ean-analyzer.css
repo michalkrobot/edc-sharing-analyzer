@@ -210,6 +210,11 @@ body.auth-locked .app-shell {
   padding: 0.35rem 0.7rem;
 }
 
+.auth-settings-btn.is-active {
+  border-color: #9fc77c;
+  background: #e9f4de;
+}
+
 .admin-settings-card {
   margin-bottom: 1rem;
   background:
@@ -228,6 +233,43 @@ body.auth-locked .app-shell {
 
 .admin-settings-head h2 {
   margin: 0;
+}
+
+.admin-tabs {
+  margin-top: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem;
+  border: 1px solid #dbe5d7;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.admin-tab-btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.86rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+.admin-tab-btn:hover {
+  color: #2f4b24;
+}
+
+.admin-tab-btn.is-active {
+  border-color: #9fc77c;
+  background: #edf6e5;
+  color: #2f4b24;
+}
+
+.admin-tab-panel {
+  margin-top: 0.7rem;
 }
 
 .admin-import-card {
@@ -1505,6 +1547,16 @@ th.ean {
   border-color: #9ccfc2;
 }
 
+.interactive-row.is-filter-selected {
+  background: #cceee5;
+  box-shadow: inset 4px 0 0 #0f766e;
+}
+
+.interactive-row.is-filter-selected td {
+  border-color: #7bbfae;
+  font-weight: 700;
+}
+
 .consumer-main-cell {
   display: flex;
   align-items: center;
@@ -1848,6 +1900,15 @@ th.ean {
   align-items: center;
   gap: 1.2rem;
   margin-bottom: 0.6rem;
+}
+
+.member-best-day-controls {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.member-best-day-controls .time-range-field {
+  min-width: 220px;
 }
 
 .toggle-label {
@@ -2367,6 +2428,11 @@ body[data-page="member-sharing"] .interactive-row:hover {
 body[data-page="member-sharing"] .interactive-row.is-selected {
   background: #dff3ee;
   box-shadow: inset 3px 0 0 #10b981;
+}
+
+body[data-page="member-sharing"] .interactive-row.is-filter-selected {
+  background: #caede3;
+  box-shadow: inset 5px 0 0 #0f766e;
 }
 
 body[data-page="member-sharing"] .consumer-breakdown-bar-fill,
