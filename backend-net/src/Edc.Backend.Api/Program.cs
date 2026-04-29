@@ -1,6 +1,7 @@
 using Edc.Backend.Api.Features.Admin;
 using Edc.Backend.Api.Features.AllocationPlanner;
 using Edc.Backend.Api.Features.Auth;
+using Edc.Backend.Api.Features.EdcScraper;
 using Edc.Backend.Api.Features.Member;
 using Edc.Backend.Api.Features.Shared;
 using Edc.Backend.Api.Features.Simulation;
@@ -28,8 +29,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddSingleton<ICsvParser, CsvParser>();
 builder.Services.AddSingleton<SimulationService>();
+builder.Services.AddSingleton<EdcPortalScraper>();
 builder.Services.AddScoped<IAppService, AppService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddSingleton<EdcScraperHostedService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<EdcScraperHostedService>());
 
 builder.Services.AddCors(options =>
 {
@@ -61,6 +65,9 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await dbContext.Database.MigrateAsync();
+    
     var service = scope.ServiceProvider.GetRequiredService<IAppService>();
     await service.InitializeAsync();
 }
@@ -134,6 +141,7 @@ app.MapAdminEndpoints();
 app.MapPublicEndpoints();
 app.MapSimulationEndpoints();
 app.MapAllocationPlannerEndpoints();
+app.MapEdcScraperEndpoints();
 app.MapFallbackToFile("index.html");
 
 var portRaw = Environment.GetEnvironmentVariable("PORT");

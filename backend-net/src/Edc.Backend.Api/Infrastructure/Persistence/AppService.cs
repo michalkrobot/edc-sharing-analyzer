@@ -47,6 +47,16 @@ public interface IAppService
     Task<List<PriorityLinkDto>> GetPriorityLinksAsync(int tenantId, CancellationToken cancellationToken = default);
     Task AddPriorityLinkAsync(int tenantId, string producerEan, string consumerEan, CancellationToken cancellationToken = default);
     Task DeletePriorityLinkAsync(int tenantId, string producerEan, string consumerEan, CancellationToken cancellationToken = default);
+
+    // EDC přihlašovací údaje
+    Task UpsertEdcCredentialAsync(int tenantId, string email, string password, CancellationToken cancellationToken = default);
+    Task DeleteEdcCredentialAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task<object?> GetEdcCredentialInfoAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task<List<(int TenantId, string Email, string PasswordEncrypted)>> GetAllEnabledEdcCredentialsAsync(CancellationToken cancellationToken = default);
+    
+    // EDC import history
+    Task LogEdcImportAsync(int tenantId, string filename, string reportKind, int recordCount, string status = "success", string? errorMessage = null, CancellationToken cancellationToken = default);
+    Task<List<object>> GetEdcImportHistoryAsync(int tenantId, int limit = 50, CancellationToken cancellationToken = default);
 }
 
 public sealed class AppService(
@@ -1860,5 +1870,95 @@ public sealed class AppService(
             db.PriorityLinks.Remove(entity);
             await db.SaveChangesAsync(cancellationToken);
         }
+    }
+
+    public async Task UpsertEdcCredentialAsync(int tenantId, string email, string password, CancellationToken cancellationToken = default)
+    {
+        var encrypted = SecurityUtils.EncryptAes(password, authOptions.Value.Pepper);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var existing = await db.TenantEdcCredentials.FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        if (existing is null)
+        {
+            db.TenantEdcCredentials.Add(new TenantEdcCredential
+            {
+                TenantId = tenantId,
+                EdcEmail = email,
+                EdcPasswordEncrypted = encrypted,
+                IsEnabled = true,
+                UpdatedAt = now,
+            });
+        }
+        else
+        {
+            existing.EdcEmail = email;
+            existing.EdcPasswordEncrypted = encrypted;
+            existing.IsEnabled = true;
+            existing.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteEdcCredentialAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        var entity = await db.TenantEdcCredentials.FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        if (entity is not null)
+        {
+            db.TenantEdcCredentials.Remove(entity);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task<object?> GetEdcCredentialInfoAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        var entity = await db.TenantEdcCredentials.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        if (entity is null) return null;
+        return new { email = entity.EdcEmail, isEnabled = entity.IsEnabled, updatedAt = entity.UpdatedAt };
+    }
+
+    public async Task<List<(int TenantId, string Email, string PasswordEncrypted)>> GetAllEnabledEdcCredentialsAsync(CancellationToken cancellationToken = default)
+    {
+        return await db.TenantEdcCredentials.AsNoTracking()
+            .Where(x => x.IsEnabled)
+            .Select(x => new ValueTuple<int, string, string>(x.TenantId, x.EdcEmail, x.EdcPasswordEncrypted))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task LogEdcImportAsync(int tenantId, string filename, string reportKind, int recordCount, string status = "success", string? errorMessage = null, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var entity = new EdcImportHistory
+        {
+            TenantId = tenantId,
+            Filename = filename,
+            ReportKind = reportKind,
+            RecordCount = recordCount,
+            Status = status,
+            ErrorMessage = errorMessage,
+            ImportedAt = now
+        };
+        db.EdcImportHistories.Add(entity);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<List<object>> GetEdcImportHistoryAsync(int tenantId, int limit = 50, CancellationToken cancellationToken = default)
+    {
+        var history = await db.EdcImportHistories.AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .OrderByDescending(x => x.ImportedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        return history.Select(x => new
+        {
+            id = x.Id,
+            filename = x.Filename,
+            reportKind = x.ReportKind,
+            recordCount = x.RecordCount,
+            status = x.Status,
+            errorMessage = x.ErrorMessage,
+            importedAt = x.ImportedAt,
+            importedAtDate = DateTimeOffset.FromUnixTimeMilliseconds(x.ImportedAt).ToString("yyyy-MM-dd HH:mm:ss")
+        }).Cast<object>().ToList();
     }
 }

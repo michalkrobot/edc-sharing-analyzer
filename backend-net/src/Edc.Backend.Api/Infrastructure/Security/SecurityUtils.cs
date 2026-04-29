@@ -24,4 +24,43 @@ public static class SecurityUtils
             .Replace('/', '_')
             .TrimEnd('=');
     }
+
+    /// <summary>
+    /// Zašifruje text pomocí AES-256-CBC, klíč je odvozen z pepper pomocí SHA-256.
+    /// Vrátí Base64 řetězec s IV (prvních 16 bytů) + ciphertext.
+    /// </summary>
+    public static string EncryptAes(string plaintext, string pepper)
+    {
+        var key = SHA256.HashData(Encoding.UTF8.GetBytes(pepper));
+        using var aes = Aes.Create();
+        aes.Key = key;
+        aes.GenerateIV();
+        using var encryptor = aes.CreateEncryptor();
+        var plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
+        var cipherBytes = encryptor.TransformFinalBlock(plaintextBytes, 0, plaintextBytes.Length);
+        var result = new byte[aes.IV.Length + cipherBytes.Length];
+        aes.IV.CopyTo(result, 0);
+        cipherBytes.CopyTo(result, aes.IV.Length);
+        return Convert.ToBase64String(result);
+    }
+
+    /// <summary>
+    /// Dešifruje text zašifrovaný pomocí EncryptAes.
+    /// </summary>
+    public static string DecryptAes(string cipherBase64, string pepper)
+    {
+        var key = SHA256.HashData(Encoding.UTF8.GetBytes(pepper));
+        var data = Convert.FromBase64String(cipherBase64);
+        using var aes = Aes.Create();
+        aes.Key = key;
+        var ivLength = aes.BlockSize / 8;
+        var iv = new byte[ivLength];
+        Array.Copy(data, 0, iv, 0, ivLength);
+        aes.IV = iv;
+        using var decryptor = aes.CreateDecryptor();
+        var cipherBytes = new byte[data.Length - ivLength];
+        Array.Copy(data, ivLength, cipherBytes, 0, cipherBytes.Length);
+        var plainBytes = decryptor.TransformFinalBlock(cipherBytes, 0, cipherBytes.Length);
+        return Encoding.UTF8.GetString(plainBytes);
+    }
 }

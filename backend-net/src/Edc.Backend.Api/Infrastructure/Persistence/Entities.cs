@@ -145,3 +145,26 @@ public sealed class EdcLinkReading
     public string ConsumerEan { get; set; } = string.Empty;
     public double KwhShared { get; set; }
 }
+
+// Přihlašovací údaje tenanta do portálu EDC (heslo je AES-256 šifrované)
+public sealed class TenantEdcCredential
+{
+    public int TenantId { get; set; }
+    public string EdcEmail { get; set; } = string.Empty;
+    public string EdcPasswordEncrypted { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+    public long UpdatedAt { get; set; }
+}
+
+// Historie EDC importů – logování všech stažených a naimportovaných souborů
+public sealed class EdcImportHistory
+{
+    public long Id { get; set; }
+    public int TenantId { get; set; }
+    public string Filename { get; set; } = string.Empty;
+    public string ReportKind { get; set; } = string.Empty; // "Plus" nebo "Sipka"
+    public string Status { get; set; } = "success"; // "success" | "error"
+    public string? ErrorMessage { get; set; }
+    public int RecordCount { get; set; }
+    public long ImportedAt { get; set; }
+}

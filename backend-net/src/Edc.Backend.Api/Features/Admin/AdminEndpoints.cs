@@ -141,6 +141,16 @@ public static class AdminEndpoints
         try
         {
             var data = await service.SaveEdcImportAsync(csvText, filename, authResult.Auth!, body?.TenantId, cancellationToken);
+            var tenant = await service.ResolveTenantScopeAsync(authResult.Auth!, body?.TenantId, cancellationToken);
+            var tenantId = (int)(tenant.GetType().GetProperty("id")?.GetValue(tenant) ?? 0);
+            await service.LogEdcImportAsync(
+                tenantId,
+                filename,
+                "ManualPlus",
+                EstimateRecordCount(csvText),
+                "success",
+                null,
+                cancellationToken);
             return Results.Ok(data);
         }
         catch (InvalidOperationException ex)
@@ -168,6 +178,16 @@ public static class AdminEndpoints
         try
         {
             var data = await service.SaveEdcLinkImportAsync(csvText, filename, authResult.Auth!, body?.TenantId, cancellationToken);
+            var tenant = await service.ResolveTenantScopeAsync(authResult.Auth!, body?.TenantId, cancellationToken);
+            var tenantId = (int)(tenant.GetType().GetProperty("id")?.GetValue(tenant) ?? 0);
+            await service.LogEdcImportAsync(
+                tenantId,
+                filename,
+                "ManualSipka",
+                EstimateRecordCount(csvText),
+                "success",
+                null,
+                cancellationToken);
             return Results.Ok(data);
         }
         catch (InvalidOperationException ex)
@@ -338,5 +358,19 @@ public static class AdminEndpoints
         }
 
         return (auth, null);
+    }
+
+    private static int EstimateRecordCount(string? csvText)
+    {
+        if (string.IsNullOrWhiteSpace(csvText))
+        {
+            return 0;
+        }
+
+        var lines = csvText
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Count(static line => !string.IsNullOrWhiteSpace(line));
+
+        return Math.Max(0, lines - 1);
     }
 }

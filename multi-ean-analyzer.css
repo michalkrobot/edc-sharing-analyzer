@@ -275,7 +275,9 @@ body.auth-locked .app-shell {
 }
 
 .admin-import-field select,
-.admin-import-field input[type="text"] {
+.admin-import-field input[type="text"],
+.admin-import-field input[type="password"],
+.admin-import-field input[type="date"] {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.55rem 0.65rem;
@@ -402,6 +404,64 @@ body.auth-locked .app-shell {
   gap: 0.35rem;
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.admin-history-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #dbe5d7;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.admin-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.admin-history-table th,
+.admin-history-table td {
+  text-align: left;
+  padding: 0.52rem 0.62rem;
+  border-bottom: 1px solid #ebf1e8;
+  vertical-align: top;
+  font-size: 0.86rem;
+}
+
+.admin-history-table th {
+  background: #f4f9f1;
+  color: #30452a;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.admin-history-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-import-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.admin-import-status-chip.is-success {
+  background: #e9f8f1;
+  border-color: #9fd7bf;
+  color: #166246;
+}
+
+.admin-import-status-chip.is-error {
+  background: #fde7e2;
+  border-color: #efb2a2;
+  color: #a63b1c;
 }
 
 .allocation-source-card {

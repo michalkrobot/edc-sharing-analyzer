@@ -13,6 +13,8 @@
     editingTenantId: "",
     edcImportInfo: null,
     edcLinkImportInfo: null,
+    edcCredential: null,
+    edcImportHistory: [],
   };
 
   // Expose auth state globally for multi-ean-analyzer.js
@@ -398,6 +400,7 @@
     section.hidden = true;
     section.innerHTML = `<div class='admin-settings-head'><div><p class='landing-section-kicker'>Administrace</p><h2>Nastavení</h2></div><button id='adminSettingsCloseBtn' type='button' class='btn btn-ghost'>Zavřít</button></div><p class='section-description'>Pouze administrátor může importovat EDC data, databázi členů, EAN vazby a přesné vazby výrobna → odběr. Vazba uživatel ↔ EAN vzniká podle sloupce jméno člena.</p><div id='adminTenantScopeWrap' class='admin-tenant-scope' hidden><label class='admin-import-field'>Aktivní tenant<select id='adminTenantSelect'></select></label></div><div id='adminSharingFlowModeWrap' class='admin-sharing-flow-card' hidden><div><h3>Režim toku sdílení</h3><p class='section-description'>Tenant admin může přepnout, zda se mají v přehledech použít přesné vazby, nebo jen odhad z hlavního EDC exportu.</p></div><label class='admin-import-field'>Použití přesných vazeb<select id='adminSharingFlowModeSelect'><option value='auto'>Automaticky: použít přesná data, když existují</option><option value='exact'>Vynutit přesná data</option><option value='estimate'>Vynutit odhad</option></select></label></div><div class='admin-members-card'><div class='admin-members-head'><h3>EDC data</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Soubor EDC exportu<input id='adminEdcFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcBtn' type='button' class='btn btn-primary'>Importovat EDC data</button></div><div class='admin-import-card'><label class='admin-import-field'>Soubor přesných vazeb (šipky)<input id='adminEdcLinksFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEdcLinksBtn' type='button' class='btn btn-primary'>Importovat přesné vazby</button></div><p id='adminEdcImportStatus' class='auth-status'></p><div id='adminEdcImportDetails' class='admin-members-empty'></div></div><div class='admin-import-card'><label class='admin-import-field'>Soubor členů (clenove.csv)<input id='adminMembersFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportMembersBtn' type='button' class='btn btn-primary'>Importovat členy</button></div><p id='adminImportStatus' class='auth-status'></p><div class='admin-import-card'><label class='admin-import-field'>Soubor EAN (eany.csv)<input id='adminEansFileInput' type='file' accept='.csv,text/csv' /></label><button id='adminImportEansBtn' type='button' class='btn btn-primary'>Importovat EAN</button></div><p id='adminEansImportStatus' class='auth-status'></p><div id='adminEansImportDetails' class='admin-members-empty'></div><div id='globalTenantManagement' class='admin-members-card' hidden><div class='admin-members-head'><h3>Tenanti</h3><button id='adminTenantNewBtn' type='button' class='btn btn-ghost'>Nový tenant</button></div><div id='adminTenantsList' class='admin-members-list'></div><div class='admin-import-card'><label class='admin-import-field'>Název tenanta<input id='adminTenantNameInput' type='text' placeholder='Např. Enerkom horní pomoraví' /></label><label class='admin-import-field'>Admini (e-maily oddělené čárkou)<input id='adminTenantAdminsInput' type='text' placeholder='admin1@firma.cz, admin2@firma.cz' /></label><button id='adminTenantSaveBtn' type='button' class='btn btn-primary'>Uložit tenant</button></div><p id='adminTenantStatus' class='auth-status'></p></div><div class='admin-members-card'><div class='admin-members-head'><h3>Importovaní členové</h3><button id='adminReloadMembersBtn' type='button' class='btn btn-ghost'>Obnovit seznam</button></div><div id='adminMembersList' class='admin-members-list'></div></div></section>`;
     appShell.insertBefore(section, appShell.firstElementChild ? appShell.firstElementChild.nextElementSibling || appShell.lastElementChild : null);
+    section.insertAdjacentHTML("beforeend", "<div class='admin-members-card'><div class='admin-members-head'><h3>Přihlašovací údaje EDC</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>EDC e-mail<input id='adminEdcCredentialEmailInput' type='text' placeholder='user@example.cz' /></label><label class='admin-import-field'>EDC heslo<input id='adminEdcCredentialPasswordInput' type='password' placeholder='••••••••' /></label><button id='adminSaveEdcCredentialBtn' type='button' class='btn btn-primary'>Uložit údaje</button><button id='adminDeleteEdcCredentialBtn' type='button' class='btn btn-ghost'>Smazat údaje</button></div><p id='adminEdcCredentialStatus' class='auth-status'></p><div id='adminEdcCredentialInfo' class='admin-members-empty'></div></div><div class='admin-members-card'><div class='admin-members-head'><h3>Ruční import EDC</h3></div><div class='admin-import-card admin-import-card-first'><label class='admin-import-field'>Datum reportu<input id='adminEdcTriggerDateInput' type='date' /></label><button id='adminTriggerEdcScrapeBtn' type='button' class='btn btn-primary'>Spustit import</button></div><p id='adminEdcTriggerStatus' class='auth-status'></p></div><div class='admin-members-card'><div class='admin-members-head'><h3>Historie importů EDC</h3><button id='adminReloadEdcHistoryBtn' type='button' class='btn btn-ghost'>Obnovit historii</button></div><div id='adminEdcHistoryWrap' class='admin-members-empty'></div></div>");
 
     const closeBtn = document.getElementById("adminSettingsCloseBtn");
     const edcFileInput = document.getElementById("adminEdcFileInput");
@@ -424,6 +427,15 @@
     const tenantSaveBtn = document.getElementById("adminTenantSaveBtn");
     const tenantStatus = document.getElementById("adminTenantStatus");
     const reloadBtn = document.getElementById("adminReloadMembersBtn");
+    const edcCredentialEmailInput = document.getElementById("adminEdcCredentialEmailInput");
+    const edcCredentialPasswordInput = document.getElementById("adminEdcCredentialPasswordInput");
+    const saveEdcCredentialBtn = document.getElementById("adminSaveEdcCredentialBtn");
+    const deleteEdcCredentialBtn = document.getElementById("adminDeleteEdcCredentialBtn");
+    const edcCredentialStatus = document.getElementById("adminEdcCredentialStatus");
+    const triggerDateInput = document.getElementById("adminEdcTriggerDateInput");
+    const triggerEdcScrapeBtn = document.getElementById("adminTriggerEdcScrapeBtn");
+    const triggerStatus = document.getElementById("adminEdcTriggerStatus");
+    const reloadEdcHistoryBtn = document.getElementById("adminReloadEdcHistoryBtn");
 
     if (tenantScopeWrap) {
       tenantScopeWrap.hidden = !isGlobalAdminUser();
@@ -449,6 +461,8 @@
           sharingFlowModeSelect.value = getEffectiveSharingFlowMode();
         }
         await loadAdminEdcImport();
+        await loadAdminEdcCredential();
+        await loadAdminEdcImportHistory();
         await loadAdminMembers();
       });
     }
@@ -492,6 +506,7 @@
           edcStatus.textContent = response.message || "EDC data byla uložena.";
           edcFileInput.value = "";
           renderAdminEdcImport();
+          await loadAdminEdcImportHistory();
         } catch (err) {
           edcStatus.textContent = formatError(err, "Import EDC selhal.");
         } finally {
@@ -532,11 +547,122 @@
           edcStatus.textContent = response.message || "Přesné vazby byly uloženy.";
           edcLinksFileInput.value = "";
           renderAdminEdcImport();
+          await loadAdminEdcImportHistory();
         } catch (err) {
           edcStatus.textContent = formatError(err, "Import přesných vazeb selhal.");
         } finally {
           importEdcLinksBtn.disabled = false;
         }
+      });
+    }
+
+    if (saveEdcCredentialBtn && edcCredentialEmailInput && edcCredentialPasswordInput && edcCredentialStatus) {
+      saveEdcCredentialBtn.addEventListener("click", async () => {
+        const tenantId = getEffectiveTenantId();
+        const email = String(edcCredentialEmailInput.value || "").trim();
+        const password = String(edcCredentialPasswordInput.value || "").trim();
+        if (!tenantId) {
+          edcCredentialStatus.textContent = "Vyber tenant.";
+          return;
+        }
+        if (!email) {
+          edcCredentialStatus.textContent = "Vyplň e-mail do EDC.";
+          return;
+        }
+        if (!password) {
+          edcCredentialStatus.textContent = "Vyplň heslo do EDC.";
+          return;
+        }
+
+        saveEdcCredentialBtn.disabled = true;
+        edcCredentialStatus.textContent = "Ukládám přihlašovací údaje...";
+        try {
+          const response = await apiRequest(
+            "/admin/edc-credential",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, password, tenantId }),
+            },
+            true,
+          );
+          edcCredentialStatus.textContent = response.message || "Přihlašovací údaje byly uloženy.";
+          edcCredentialPasswordInput.value = "";
+          await loadAdminEdcCredential();
+        } catch (err) {
+          edcCredentialStatus.textContent = formatError(err, "Uložení přihlašovacích údajů selhalo.");
+        } finally {
+          saveEdcCredentialBtn.disabled = false;
+        }
+      });
+    }
+
+    if (deleteEdcCredentialBtn && edcCredentialStatus) {
+      deleteEdcCredentialBtn.addEventListener("click", async () => {
+        const tenantId = getEffectiveTenantId();
+        if (!tenantId) {
+          edcCredentialStatus.textContent = "Vyber tenant.";
+          return;
+        }
+
+        deleteEdcCredentialBtn.disabled = true;
+        edcCredentialStatus.textContent = "Mažu přihlašovací údaje...";
+        try {
+          const response = await apiRequest(`/admin/edc-credential?tenantId=${encodeURIComponent(tenantId)}`, { method: "DELETE" }, true);
+          edcCredentialStatus.textContent = response.message || "Přihlašovací údaje byly odstraněny.";
+          if (edcCredentialEmailInput) {
+            edcCredentialEmailInput.value = "";
+          }
+          if (edcCredentialPasswordInput) {
+            edcCredentialPasswordInput.value = "";
+          }
+          await loadAdminEdcCredential();
+        } catch (err) {
+          edcCredentialStatus.textContent = formatError(err, "Smazání přihlašovacích údajů selhalo.");
+        } finally {
+          deleteEdcCredentialBtn.disabled = false;
+        }
+      });
+    }
+
+    if (triggerDateInput) {
+      const today = new Date();
+      triggerDateInput.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    }
+
+    if (triggerEdcScrapeBtn && triggerStatus) {
+      triggerEdcScrapeBtn.addEventListener("click", async () => {
+        const tenantId = getEffectiveTenantId();
+        const date = triggerDateInput ? String(triggerDateInput.value || "").trim() : "";
+        if (!tenantId) {
+          triggerStatus.textContent = "Vyber tenant.";
+          return;
+        }
+
+        triggerEdcScrapeBtn.disabled = true;
+        triggerStatus.textContent = "Spouštím import na pozadí...";
+        try {
+          const response = await apiRequest(
+            "/admin/trigger-edc-scrape",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ tenantId, date: date || null }),
+            },
+            true,
+          );
+          triggerStatus.textContent = response.message || "Import byl spuštěn na pozadí.";
+        } catch (err) {
+          triggerStatus.textContent = formatError(err, "Spuštění importu selhalo.");
+        } finally {
+          triggerEdcScrapeBtn.disabled = false;
+        }
+      });
+    }
+
+    if (reloadEdcHistoryBtn) {
+      reloadEdcHistoryBtn.addEventListener("click", async () => {
+        await loadAdminEdcImportHistory();
       });
     }
 
@@ -681,7 +807,9 @@
     }
 
     loadAdminTenants().then(async () => {
+      await loadAdminEdcCredential();
       await loadAdminEdcImport();
+      await loadAdminEdcImportHistory();
       await loadAdminMembers();
     });
 
@@ -731,6 +859,9 @@
             tenantAdminsInput.value = (tenant.admins || []).map((admin) => admin.email).join(", ");
           }
           renderTenantManagement();
+          loadAdminEdcCredential();
+          loadAdminEdcImport();
+          loadAdminEdcImportHistory();
           loadAdminMembers();
         });
       });
@@ -821,6 +952,104 @@
       adminState.edcImportInfo = null;
       adminState.edcLinkImportInfo = null;
       details.innerHTML = `<p class='admin-members-empty'>${escapeHtml(formatError(err, "Nepodařilo se načíst EDC data."))}</p>`;
+    }
+  }
+
+  function renderAdminEdcCredential() {
+    const infoWrap = document.getElementById("adminEdcCredentialInfo");
+    const emailInput = document.getElementById("adminEdcCredentialEmailInput");
+    if (!infoWrap) {
+      return;
+    }
+
+    const credential = adminState.edcCredential;
+    if (!credential) {
+      infoWrap.innerHTML = "<p class='admin-members-empty'>Přihlašovací údaje pro tento tenant ještě nejsou uložené.</p>";
+      if (emailInput) {
+        emailInput.value = "";
+      }
+      return;
+    }
+
+    if (emailInput) {
+      emailInput.value = String(credential.email || "");
+    }
+
+    const isEnabled = credential.isEnabled === true;
+    infoWrap.innerHTML = `<div class='admin-edc-summary'><span><strong>E-mail:</strong> ${escapeHtml(String(credential.email || "-"))}</span><span><strong>Stav:</strong> ${isEnabled ? "aktivní" : "neaktivní"}</span><span><strong>Naposledy změněno:</strong> ${escapeHtml(formatAdminDateTime(credential.updatedAt))}</span></div>`;
+  }
+
+  async function loadAdminEdcCredential() {
+    const infoWrap = document.getElementById("adminEdcCredentialInfo");
+    const status = document.getElementById("adminEdcCredentialStatus");
+    if (!infoWrap || !isAdminUser()) {
+      return;
+    }
+
+    const tenantId = getEffectiveTenantId();
+    if (!tenantId) {
+      adminState.edcCredential = null;
+      if (status) {
+        status.textContent = "";
+      }
+      infoWrap.innerHTML = "<p class='admin-members-empty'>Vyber tenant pro správu přihlašovacích údajů.</p>";
+      return;
+    }
+
+    infoWrap.innerHTML = "<p class='admin-members-empty'>Načítám přihlašovací údaje...</p>";
+    try {
+      const response = await apiRequest(`/admin/edc-credential?tenantId=${encodeURIComponent(tenantId)}`, { method: "GET" }, true);
+      adminState.edcCredential = response.credential || null;
+      renderAdminEdcCredential();
+    } catch (err) {
+      adminState.edcCredential = null;
+      infoWrap.innerHTML = `<p class='admin-members-empty'>${escapeHtml(formatError(err, "Nepodařilo se načíst přihlašovací údaje."))}</p>`;
+    }
+  }
+
+  function renderAdminEdcImportHistory() {
+    const wrap = document.getElementById("adminEdcHistoryWrap");
+    if (!wrap) {
+      return;
+    }
+
+    const history = Array.isArray(adminState.edcImportHistory) ? adminState.edcImportHistory : [];
+    if (history.length === 0) {
+      wrap.innerHTML = "<p class='admin-members-empty'>Historie importů je zatím prázdná.</p>";
+      return;
+    }
+
+    const rows = history.map((row) => {
+      const statusValue = String(row.status || "").toLowerCase();
+      const statusClass = statusValue === "success" ? "is-success" : "is-error";
+      const dateValue = row.importedAtDate || formatAdminDateTime(row.importedAt);
+      return `<tr><td>${escapeHtml(row.filename || "-")}</td><td>${escapeHtml(row.reportKind || "-")}</td><td>${escapeHtml(String(row.recordCount ?? 0))}</td><td><span class='admin-import-status-chip ${statusClass}'>${escapeHtml(statusValue || "-")}</span></td><td>${escapeHtml(dateValue || "-")}</td><td>${escapeHtml(row.errorMessage || "")}</td></tr>`;
+    }).join("");
+
+    wrap.innerHTML = `<div class='admin-history-table-wrap'><table class='admin-history-table'><thead><tr><th>Soubor</th><th>Typ</th><th>Záznamy</th><th>Stav</th><th>Importováno</th><th>Chyba</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  async function loadAdminEdcImportHistory() {
+    const wrap = document.getElementById("adminEdcHistoryWrap");
+    if (!wrap || !isAdminUser()) {
+      return;
+    }
+
+    const tenantId = getEffectiveTenantId();
+    if (!tenantId) {
+      adminState.edcImportHistory = [];
+      wrap.innerHTML = "<p class='admin-members-empty'>Vyber tenant pro historii importů.</p>";
+      return;
+    }
+
+    wrap.innerHTML = "<p class='admin-members-empty'>Načítám historii importů...</p>";
+    try {
+      const response = await apiRequest(`/admin/edc-import-history?tenantId=${encodeURIComponent(tenantId)}`, { method: "GET" }, true);
+      adminState.edcImportHistory = Array.isArray(response.history) ? response.history : [];
+      renderAdminEdcImportHistory();
+    } catch (err) {
+      adminState.edcImportHistory = [];
+      wrap.innerHTML = `<p class='admin-members-empty'>${escapeHtml(formatError(err, "Nepodařilo se načíst historii importů."))}</p>`;
     }
   }
 

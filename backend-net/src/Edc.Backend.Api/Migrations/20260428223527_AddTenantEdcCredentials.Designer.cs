@@ -3,6 +3,7 @@ using System;
 using Edc.Backend.Api.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Edc.Backend.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260428223527_AddTenantEdcCredentials")]
+    partial class AddTenantEdcCredentials
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,51 +24,6 @@ namespace Edc.Backend.Api.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("Edc.Backend.Api.Infrastructure.Persistence.EdcImportHistory", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("text")
-                        .HasColumnName("error_message");
-
-                    b.Property<string>("Filename")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("filename");
-
-                    b.Property<long>("ImportedAt")
-                        .HasColumnType("bigint")
-                        .HasColumnName("imported_at");
-
-                    b.Property<int>("RecordCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("record_count");
-
-                    b.Property<string>("ReportKind")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("report_kind");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("status");
-
-                    b.Property<int>("TenantId")
-                        .HasColumnType("integer")
-                        .HasColumnName("tenant_id");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("edc_import_history", (string)null);
-                });
 
             modelBuilder.Entity("Edc.Backend.Api.Infrastructure.Persistence.EdcLinkReading", b =>
                 {

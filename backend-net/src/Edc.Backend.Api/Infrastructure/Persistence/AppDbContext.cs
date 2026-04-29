@@ -17,6 +17,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<EdcLinkReading> EdcLinkReadings => Set<EdcLinkReading>();
     public DbSet<SyntheticEan> SyntheticEans => Set<SyntheticEan>();
     public DbSet<PriorityLink> PriorityLinks => Set<PriorityLink>();
+    public DbSet<TenantEdcCredential> TenantEdcCredentials => Set<TenantEdcCredential>();
+    public DbSet<EdcImportHistory> EdcImportHistories => Set<EdcImportHistory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -143,5 +145,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         modelBuilder.Entity<EdcLinkReading>().Property(x => x.ProducerEan).HasColumnName("producer_ean");
         modelBuilder.Entity<EdcLinkReading>().Property(x => x.ConsumerEan).HasColumnName("consumer_ean");
         modelBuilder.Entity<EdcLinkReading>().Property(x => x.KwhShared).HasColumnName("kwh_shared");
+
+        modelBuilder.Entity<TenantEdcCredential>().ToTable("tenant_edc_credentials");
+        modelBuilder.Entity<TenantEdcCredential>().HasKey(x => x.TenantId);
+        modelBuilder.Entity<TenantEdcCredential>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<TenantEdcCredential>().Property(x => x.EdcEmail).HasColumnName("edc_email");
+        modelBuilder.Entity<TenantEdcCredential>().Property(x => x.EdcPasswordEncrypted).HasColumnName("edc_password_encrypted");
+        modelBuilder.Entity<TenantEdcCredential>().Property(x => x.IsEnabled).HasColumnName("is_enabled");
+        modelBuilder.Entity<TenantEdcCredential>().Property(x => x.UpdatedAt).HasColumnName("updated_at");
+
+        modelBuilder.Entity<EdcImportHistory>().ToTable("edc_import_history");
+        modelBuilder.Entity<EdcImportHistory>().HasKey(x => x.Id);
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.Id).HasColumnName("id").UseIdentityColumn();
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.Filename).HasColumnName("filename");
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.ReportKind).HasColumnName("report_kind");
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.Status).HasColumnName("status");
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.ErrorMessage).HasColumnName("error_message");
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.RecordCount).HasColumnName("record_count");
+        modelBuilder.Entity<EdcImportHistory>().Property(x => x.ImportedAt).HasColumnName("imported_at");
     }
 }
