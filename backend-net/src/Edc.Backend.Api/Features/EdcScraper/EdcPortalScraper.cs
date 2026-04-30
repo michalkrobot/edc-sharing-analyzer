@@ -63,7 +63,7 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
 
             // 3. Přejít na stránku reportů
             logger.LogInformation("EDC scraper: přihlášení úspěšné, přecházím na stránku reportů");
-            await page.GotoAsync($"{PortalBaseUrl}{ReportsPath}", new PageGotoOptions { Timeout = 30_000 });
+            await OpenReportsPageWithRetryAsync(page, email, password);
 
             // 4. Stáhnout reporty
             var results = await DownloadTodayReportsAsync(page, date, cancellationToken);
@@ -186,6 +186,82 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
         }
 
         throw new TimeoutException("Prihlaseni do EDC timeout: nedoslo k navratu z SSO na portal v limitu 60s.");
+    }
+
+    private async Task OpenReportsPageWithRetryAsync(IPage page, string email, string password)
+    {
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            await page.GotoAsync($"{PortalBaseUrl}{ReportsPath}", new PageGotoOptions { Timeout = 30_000 });
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 20_000 });
+
+            var hasReportsContent = await HasReportsContentAsync(page);
+            if (hasReportsContent)
+            {
+                logger.LogInformation("EDC scraper: report stránka načtena (pokus {Attempt}).", attempt);
+                return;
+            }
+
+            var bodySample = await GetBodySampleAsync(page);
+            var hasLoginButton = await page.GetByText("Registrace / Přihlášení").First.IsVisibleAsync();
+            logger.LogWarning(
+                "EDC scraper: report stránka bez očekávaného obsahu (pokus {Attempt}), URL={Url}, LoginButtonVisible={LoginVisible}, BodySample={BodySample}",
+                attempt,
+                page.Url,
+                hasLoginButton,
+                bodySample);
+
+            // Pokud vidíme veřejné tlačítko pro přihlášení, zkusíme znovu auth flow.
+            if (hasLoginButton)
+            {
+                try
+                {
+                    var loginButton = page.GetByText("Registrace / Přihlášení").First;
+                    await loginButton.ClickAsync(new LocatorClickOptions { Timeout = 10_000 });
+                    await FillLoginFormAsync(page, email, password);
+                }
+                catch
+                {
+                    // Retry další iterací.
+                }
+            }
+        }
+
+        throw new InvalidOperationException("EDC scraper: report stránku se nepodařilo načíst v autorizovaném režimu.");
+    }
+
+    private static async Task<bool> HasReportsContentAsync(IPage page)
+    {
+        var selectors = new[]
+        {
+            "tr:has-text('Plus-cron')",
+            "tr:has-text('Sipka-cron')",
+            "mat-row:has-text('Plus-cron')",
+            "mat-row:has-text('Sipka-cron')",
+            "[role='row']:has-text('Plus-cron')",
+            "[role='row']:has-text('Sipka-cron')",
+            "button:has-text('Stáhnout')",
+            "a:has-text('Stáhnout')",
+            "[role='button']:has-text('Stáhnout')",
+            "[role='link']:has-text('Stáhnout')",
+        };
+
+        foreach (var selector in selectors)
+        {
+            if (await page.Locator(selector).CountAsync() > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<string> GetBodySampleAsync(IPage page)
+    {
+        var text = await page.Locator("body").InnerTextAsync();
+        var normalized = text.Replace("\n", " ").Replace("\r", " ").Trim();
+        return normalized.Length > 600 ? normalized[..600] : normalized;
     }
 
     private async Task<List<DownloadedReport>> DownloadTodayReportsAsync(
