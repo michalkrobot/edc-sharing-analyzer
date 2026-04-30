@@ -35,11 +35,24 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
             Headless = true,
+            Args =
+            [
+                "--disable-blink-features=AutomationControlled",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ],
         });
 
         var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
             AcceptDownloads = true,
+            Locale = "cs-CZ",
+            TimezoneId = "Europe/Prague",
+            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+            ExtraHTTPHeaders = new Dictionary<string, string>
+            {
+                ["Accept-Language"] = "cs-CZ,cs;q=0.9,en;q=0.8",
+            },
         });
 
         var page = await context.NewPageAsync();
@@ -192,8 +205,20 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
     {
         for (var attempt = 1; attempt <= 3; attempt++)
         {
-            await page.GotoAsync($"{PortalBaseUrl}{ReportsPath}", new PageGotoOptions { Timeout = 30_000 });
+            if (attempt > 1)
+            {
+                await TryReauthenticateAsync(page, email, password, attempt);
+            }
+
+            var response = await page.GotoAsync($"{PortalBaseUrl}{ReportsPath}", new PageGotoOptions { Timeout = 30_000 });
             await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 20_000 });
+
+            logger.LogInformation(
+                "EDC scraper: report page response pokus {Attempt}: Status={Status}, Ok={Ok}, Url={ResponseUrl}",
+                attempt,
+                response?.Status,
+                response?.Ok,
+                response?.Url);
 
             var hasReportsContent = await HasReportsContentAsync(page);
             if (hasReportsContent)
@@ -204,27 +229,16 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
 
             var bodySample = await GetBodySampleAsync(page);
             var hasLoginButton = await page.GetByText("Registrace / Přihlášení").First.IsVisibleAsync();
+            var cookieSummary = await GetCookieSummaryAsync(page);
+            var framesSummary = string.Join(" | ", page.Frames.Select(f => f.Url));
             logger.LogWarning(
-                "EDC scraper: report stránka bez očekávaného obsahu (pokus {Attempt}), URL={Url}, LoginButtonVisible={LoginVisible}, BodySample={BodySample}",
+                "EDC scraper: report stránka bez očekávaného obsahu (pokus {Attempt}), URL={Url}, LoginButtonVisible={LoginVisible}, Cookies={Cookies}, Frames={Frames}, BodySample={BodySample}",
                 attempt,
                 page.Url,
                 hasLoginButton,
+                cookieSummary,
+                framesSummary,
                 bodySample);
-
-            // Pokud vidíme veřejné tlačítko pro přihlášení, zkusíme znovu auth flow.
-            if (hasLoginButton)
-            {
-                try
-                {
-                    var loginButton = page.GetByText("Registrace / Přihlášení").First;
-                    await loginButton.ClickAsync(new LocatorClickOptions { Timeout = 10_000 });
-                    await FillLoginFormAsync(page, email, password);
-                }
-                catch
-                {
-                    // Retry další iterací.
-                }
-            }
         }
 
         throw new InvalidOperationException("EDC scraper: report stránku se nepodařilo načíst v autorizovaném režimu.");
@@ -246,15 +260,51 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
             "[role='link']:has-text('Stáhnout')",
         };
 
-        foreach (var selector in selectors)
+        foreach (var frame in page.Frames)
         {
-            if (await page.Locator(selector).CountAsync() > 0)
+            foreach (var selector in selectors)
             {
-                return true;
+                if (await frame.Locator(selector).CountAsync() > 0)
+                {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    private static async Task<string> GetCookieSummaryAsync(IPage page)
+    {
+        var cookies = await page.Context.CookiesAsync();
+        var cookieDomains = cookies
+            .Select(c => c.Domain)
+            .Where(d => !string.IsNullOrWhiteSpace(d))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return $"Count={cookies.Count}; Domains={string.Join(',', cookieDomains)}";
+    }
+
+    private static async Task TryReauthenticateAsync(IPage page, string email, string password, int attempt)
+    {
+        try
+        {
+            await page.GotoAsync(PortalBaseUrl, new PageGotoOptions { Timeout = 30_000 });
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 20_000 });
+
+            var loginButton = page.GetByText("Registrace / Přihlášení").First;
+            if (await loginButton.IsVisibleAsync())
+            {
+                await loginButton.ClickAsync(new LocatorClickOptions { Timeout = 15_000 });
+            }
+
+            await FillLoginFormAsync(page, email, password);
+        }
+        catch
+        {
+            // Necháme retry pokračovat; detail se zaloguje v hlavní smyčce.
+        }
     }
 
     private static async Task<string> GetBodySampleAsync(IPage page)
