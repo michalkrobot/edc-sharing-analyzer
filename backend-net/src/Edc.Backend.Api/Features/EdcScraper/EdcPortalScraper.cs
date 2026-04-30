@@ -226,6 +226,7 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
         CancellationToken cancellationToken)
     {
         var downloaded = new List<DownloadedReport>();
+        var dateToken = dateText.Replace('.', '_');
 
         // Počkáme, než Angular tabulka donačte data (může trvat i několik sekund).
         // Hledáme libovolný řádek s prefixem reportu jako indikátor, že se data načetla.
@@ -240,7 +241,21 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
         }
         catch
         {
-            // Tabulka nenačetla žádný řádek pro tento prefix – logujeme a vracíme prázdný výsledek.
+            // Tabulka nenačetla žádný řádek pro tento prefix – zkusíme globální fallback hledání přes akce Stáhnout.
+            await LogReportPageDiagnosticsAsync(page, reportPrefix, dateText);
+            var fallbackDownload = await TryGlobalDownloadFallbackAsync(page, reportPrefix, dateToken);
+            if (fallbackDownload is not null)
+            {
+                var fallbackFilename = fallbackDownload.SuggestedFilename;
+                logger.LogInformation("EDC scraper: fallback stažen soubor {Filename}", fallbackFilename);
+
+                using var fallbackStream = await fallbackDownload.CreateReadStreamAsync();
+                using var fallbackReader = new StreamReader(fallbackStream, System.Text.Encoding.UTF8);
+                var fallbackCsvText = await fallbackReader.ReadToEndAsync(cancellationToken);
+                downloaded.Add(new DownloadedReport(fallbackFilename, fallbackCsvText, kind));
+                return downloaded;
+            }
+
             logger.LogWarning("EDC scraper: nenalezen radek reportu pro {Prefix} (timeout čekání na tabulku)", reportPrefix);
             return downloaded;
         }
@@ -265,6 +280,21 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
             {
                 logger.LogWarning("EDC scraper: nenalezen radek reportu pro {Prefix}", reportPrefix);
             }
+
+            // Když nejsou řádky s konkrétním datem, zkusíme globální fallback přes akce Stáhnout.
+            var fallbackDownload = await TryGlobalDownloadFallbackAsync(page, reportPrefix, dateToken);
+            if (fallbackDownload is not null)
+            {
+                var fallbackFilename = fallbackDownload.SuggestedFilename;
+                logger.LogInformation("EDC scraper: fallback stažen soubor {Filename}", fallbackFilename);
+
+                using var fallbackStream = await fallbackDownload.CreateReadStreamAsync();
+                using var fallbackReader = new StreamReader(fallbackStream, System.Text.Encoding.UTF8);
+                var fallbackCsvText = await fallbackReader.ReadToEndAsync(cancellationToken);
+                downloaded.Add(new DownloadedReport(fallbackFilename, fallbackCsvText, kind));
+                return downloaded;
+            }
+
             return downloaded;
         }
 
@@ -407,5 +437,76 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
         logger.LogWarning("EDC scraper: radek {Prefix} (index {Index}) nema dostupnou akci Stahnout. HTML: {Html}", reportPrefix, rowIndex, rowHtml);
         logger.LogWarning("EDC scraper: radek {Prefix} (index {Index}) nema dostupnou akci Stahnout", reportPrefix, rowIndex);
         return null;
+    }
+
+    private async Task<IDownload?> TryGlobalDownloadFallbackAsync(IPage page, string reportPrefix, string dateToken)
+    {
+        // Produkce může mít odlišný DOM (virtualizovaná tabulka / shadow komponenta). V nouzi klikáme globálně na akce Stáhnout.
+        var globalTargets = page.Locator(
+            "button:has-text('Stáhnout'), " +
+            "a:has-text('Stáhnout'), " +
+            "[role='button']:has-text('Stáhnout'), " +
+            "[role='link']:has-text('Stáhnout'), " +
+            "span:has-text('Stáhnout'), " +
+            "div:has-text('Stáhnout')");
+
+        var count = await globalTargets.CountAsync();
+        logger.LogInformation("EDC scraper: fallback hledani Stáhnout nalezlo {Count} kandidátů pro {Prefix}", count, reportPrefix);
+
+        for (var i = 0; i < count; i++)
+        {
+            var target = globalTargets.Nth(i);
+            if (!await target.IsVisibleAsync())
+            {
+                continue;
+            }
+
+            try
+            {
+                var downloadTask = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = 30_000 });
+                await target.ClickAsync(new LocatorClickOptions { Timeout = 15_000, Force = true });
+                var download = await downloadTask;
+                var filename = download.SuggestedFilename ?? string.Empty;
+
+                if (filename.Contains(reportPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    filename.Contains(dateToken, StringComparison.OrdinalIgnoreCase))
+                {
+                    return download;
+                }
+            }
+            catch
+            {
+                // Zkusíme další kandidát.
+            }
+        }
+
+        return null;
+    }
+
+    private async Task LogReportPageDiagnosticsAsync(IPage page, string reportPrefix, string dateText)
+    {
+        try
+        {
+            var title = await page.TitleAsync();
+            var bodyText = await page.Locator("body").InnerTextAsync();
+            var bodySample = bodyText.Length > 800 ? bodyText[..800] : bodyText;
+
+            var stahnoutCount = await page.Locator(
+                "button:has-text('Stáhnout'), a:has-text('Stáhnout'), [role='button']:has-text('Stáhnout'), [role='link']:has-text('Stáhnout')")
+                .CountAsync();
+
+            logger.LogWarning(
+                "EDC scraper: diagnostika report page. URL={Url}, Title={Title}, Prefix={Prefix}, Date={Date}, StahnoutCount={Count}, BodySample={Sample}",
+                page.Url,
+                title,
+                reportPrefix,
+                dateText,
+                stahnoutCount,
+                bodySample.Replace("\n", " ").Replace("\r", " "));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "EDC scraper: nepovedla se diagnostika report stránky");
+        }
     }
 }
