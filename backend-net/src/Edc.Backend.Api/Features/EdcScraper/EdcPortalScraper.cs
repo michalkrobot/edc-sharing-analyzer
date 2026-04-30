@@ -197,8 +197,9 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
 
         var results = new List<DownloadedReport>();
 
-        // Na stránce reportů je datum vidět jako "dd.MM.yyyy HH:mm".
-        var dateText = date.ToString("dd.MM.yyyy");
+        // Na portálu EDC je datum ve formátu "dd.MM.yyyy" – explicitní format string bez závislosti na kultuře.
+        var dateText = date.ToString("dd.MM.yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        logger.LogInformation("EDC scraper: hledám řádky pro datum {DateText}", dateText);
 
         foreach (var kind in new[] { ReportKind.PlusCron, ReportKind.SipkaCron })
         {
@@ -226,13 +227,44 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
     {
         var downloaded = new List<DownloadedReport>();
 
-        // Na portálu je akce ke stažení v tabulce jako tlačítko "Stáhnout" v řádku reportu.
-        // Název reportu: Prefix-Export-dat-yyyy-mm-dd-hh-mm-ss-cisloSkupiny-nazevSkupiny
-        var candidateRows = page.Locator($"tr:has-text('{reportPrefix}'):has-text('{dateText}')");
+        // Počkáme, než Angular tabulka donačte data (může trvat i několik sekund).
+        // Hledáme libovolný řádek s prefixem reportu jako indikátor, že se data načetla.
+        var anyRowSelector = $"tr:has-text('{reportPrefix}'), mat-row:has-text('{reportPrefix}'), [role='row']:has-text('{reportPrefix}')";
+        try
+        {
+            await page.Locator(anyRowSelector).First.WaitForAsync(new LocatorWaitForOptions
+            {
+                State = WaitForSelectorState.Visible,
+                Timeout = 15_000,
+            });
+        }
+        catch
+        {
+            // Tabulka nenačetla žádný řádek pro tento prefix – logujeme a vracíme prázdný výsledek.
+            logger.LogWarning("EDC scraper: nenalezen radek reportu pro {Prefix} (timeout čekání na tabulku)", reportPrefix);
+            return downloaded;
+        }
+
+        // Portál používá Angular Material (mat-row) nebo klasické tr; hledáme oba typy řádků.
+        var candidateRows = page.Locator(
+            $"tr:has-text('{reportPrefix}'):has-text('{dateText}'), " +
+            $"mat-row:has-text('{reportPrefix}'):has-text('{dateText}'), " +
+            $"[role='row']:has-text('{reportPrefix}'):has-text('{dateText}')");
         var rowCount = await candidateRows.CountAsync();
         if (rowCount == 0)
         {
-            logger.LogWarning("EDC scraper: nenalezen radek reportu pro {Prefix}", reportPrefix);
+            // Zkusíme zalogovat všechny dostupné řádky s prefixem pro diagnostiku.
+            var allRows = page.Locator(anyRowSelector);
+            var allCount = await allRows.CountAsync();
+            if (allCount > 0)
+            {
+                var firstRowText = await allRows.First.InnerTextAsync();
+                logger.LogWarning("EDC scraper: nenalezen radek reportu pro {Prefix} s datem {Date}. Prvni radek s prefixem: {Row}", reportPrefix, dateText, firstRowText.Replace("\n", " ").Replace("\r", "").Trim());
+            }
+            else
+            {
+                logger.LogWarning("EDC scraper: nenalezen radek reportu pro {Prefix}", reportPrefix);
+            }
             return downloaded;
         }
 
@@ -329,8 +361,8 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
             }
         }
 
-        // Fallback: posledni bunka v radku typicky odpovida sloupci Akce.
-        var actionCell = row.Locator("td, [role='cell'], mat-cell").Last;
+        // Fallback: posledni bunka v radku typicky odpovida sloupci Akce (tr/td i Angular Material mat-cell).
+        var actionCell = row.Locator("td, mat-cell, [role='cell']").Last;
         if (await actionCell.IsVisibleAsync())
         {
             try
