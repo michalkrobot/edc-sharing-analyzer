@@ -73,6 +73,7 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
 
             // 2. Vyplnit přihlašovací formulář
             await FillLoginFormAsync(page, email, password);
+            await EnsurePortalSessionAsync(page, email, password);
 
             // 3. Přejít na stránku reportů
             logger.LogInformation("EDC scraper: přihlášení úspěšné, přecházím na stránku reportů");
@@ -305,6 +306,37 @@ public sealed class EdcPortalScraper(ILogger<EdcPortalScraper> logger)
         {
             // Necháme retry pokračovat; detail se zaloguje v hlavní smyčce.
         }
+    }
+
+    private async Task EnsurePortalSessionAsync(IPage page, string email, string password)
+    {
+        if (await HasPortalSessionCookieAsync(page))
+        {
+            return;
+        }
+
+        var cookieSummary = await GetCookieSummaryAsync(page);
+        logger.LogWarning("EDC scraper: po přihlášení nebyla nalezena portálová session cookie. Cookies={Cookies}. Zkouším re-auth handshake.", cookieSummary);
+
+        await TryReauthenticateAsync(page, email, password, attempt: 0);
+
+        if (await HasPortalSessionCookieAsync(page))
+        {
+            logger.LogInformation("EDC scraper: portálová session cookie byla po re-auth handshake vytvořena.");
+            return;
+        }
+
+        cookieSummary = await GetCookieSummaryAsync(page);
+        throw new InvalidOperationException($"EDC scraper: přihlášení proběhlo bez portálové session cookie. Cookies={cookieSummary}");
+    }
+
+    private static async Task<bool> HasPortalSessionCookieAsync(IPage page)
+    {
+        var cookies = await page.Context.CookiesAsync();
+        return cookies.Any(c =>
+            !string.IsNullOrWhiteSpace(c.Domain) &&
+            (c.Domain.Contains("portal.edc-cr.cz", StringComparison.OrdinalIgnoreCase)
+             || c.Domain.Contains(".edc-cr.cz", StringComparison.OrdinalIgnoreCase)));
     }
 
     private static async Task<string> GetBodySampleAsync(IPage page)
