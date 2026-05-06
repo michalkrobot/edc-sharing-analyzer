@@ -32,8 +32,17 @@ builder.Services.AddSingleton<SimulationService>();
 builder.Services.AddSingleton<EdcPortalScraper>();
 builder.Services.AddScoped<IAppService, AppService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
-builder.Services.AddSingleton<EdcScraperHostedService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<EdcScraperHostedService>());
+
+var localScraperEnabledRaw = Environment.GetEnvironmentVariable("EDC_LOCAL_SCRAPER_ENABLED");
+var localScraperEnabled = string.Equals(localScraperEnabledRaw, "1", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(localScraperEnabledRaw, "true", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(localScraperEnabledRaw, "yes", StringComparison.OrdinalIgnoreCase);
+
+if (localScraperEnabled)
+{
+    builder.Services.AddSingleton<EdcScraperHostedService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<EdcScraperHostedService>());
+}
 
 builder.Services.AddCors(options =>
 {

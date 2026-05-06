@@ -19,6 +19,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PriorityLink> PriorityLinks => Set<PriorityLink>();
     public DbSet<TenantEdcCredential> TenantEdcCredentials => Set<TenantEdcCredential>();
     public DbSet<EdcImportHistory> EdcImportHistories => Set<EdcImportHistory>();
+    public DbSet<EdcScrapeJob> EdcScrapeJobs => Set<EdcScrapeJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -164,5 +165,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         modelBuilder.Entity<EdcImportHistory>().Property(x => x.ErrorMessage).HasColumnName("error_message");
         modelBuilder.Entity<EdcImportHistory>().Property(x => x.RecordCount).HasColumnName("record_count");
         modelBuilder.Entity<EdcImportHistory>().Property(x => x.ImportedAt).HasColumnName("imported_at");
+
+        modelBuilder.Entity<EdcScrapeJob>().ToTable("edc_scrape_jobs");
+        modelBuilder.Entity<EdcScrapeJob>().HasKey(x => x.Id);
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.Id).HasColumnName("id").UseIdentityColumn();
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.Status).HasColumnName("status");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.RequestedDate).HasColumnName("requested_date");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.RequestedBy).HasColumnName("requested_by");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.WorkerId).HasColumnName("worker_id");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.AttemptCount).HasColumnName("attempt_count");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.LastError).HasColumnName("last_error");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.CreatedAt).HasColumnName("created_at");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.UpdatedAt).HasColumnName("updated_at");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.ClaimedAt).HasColumnName("claimed_at");
+        modelBuilder.Entity<EdcScrapeJob>().Property(x => x.FinishedAt).HasColumnName("finished_at");
     }
 }

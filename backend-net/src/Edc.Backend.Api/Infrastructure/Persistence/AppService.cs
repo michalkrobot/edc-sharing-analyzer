@@ -57,6 +57,13 @@ public interface IAppService
     // EDC import history
     Task LogEdcImportAsync(int tenantId, string filename, string reportKind, int recordCount, string status = "success", string? errorMessage = null, CancellationToken cancellationToken = default);
     Task<List<object>> GetEdcImportHistoryAsync(int tenantId, int limit = 50, CancellationToken cancellationToken = default);
+
+    // EDC scrape jobs for external worker pull model
+    Task<int> EnqueueEdcScrapeJobsAsync(int? tenantId, string? requestedDate, string requestedBy, CancellationToken cancellationToken = default);
+    Task<object?> ClaimNextEdcScrapeJobAsync(string workerId, int staleAfterMinutes = 20, CancellationToken cancellationToken = default);
+    Task<int?> GetEdcScrapeJobTenantIdAsync(long jobId, CancellationToken cancellationToken = default);
+    Task MarkEdcScrapeJobCompletedAsync(long jobId, CancellationToken cancellationToken = default);
+    Task MarkEdcScrapeJobFailedAsync(long jobId, string errorMessage, CancellationToken cancellationToken = default);
 }
 
 public sealed class AppService(
@@ -1960,5 +1967,162 @@ public sealed class AppService(
             importedAt = x.ImportedAt,
             importedAtDate = DateTimeOffset.FromUnixTimeMilliseconds(x.ImportedAt).ToString("yyyy-MM-dd HH:mm:ss")
         }).Cast<object>().ToList();
+    }
+
+    public async Task<int> EnqueueEdcScrapeJobsAsync(int? tenantId, string? requestedDate, string requestedBy, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var normalizedDate = string.IsNullOrWhiteSpace(requestedDate) ? null : requestedDate.Trim();
+
+        if (!string.IsNullOrWhiteSpace(normalizedDate) && !DateOnly.TryParse(normalizedDate, out _))
+        {
+            throw new InvalidOperationException("Neplatny format date, ocekava se YYYY-MM-DD.");
+        }
+
+        var credentialsQuery = db.TenantEdcCredentials.AsNoTracking().Where(x => x.IsEnabled);
+        if (tenantId.HasValue)
+        {
+            credentialsQuery = credentialsQuery.Where(x => x.TenantId == tenantId.Value);
+        }
+
+        var tenantIds = await credentialsQuery
+            .Select(x => x.TenantId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (tenantIds.Count == 0)
+        {
+            return 0;
+        }
+
+        foreach (var tid in tenantIds)
+        {
+            db.EdcScrapeJobs.Add(new EdcScrapeJob
+            {
+                TenantId = tid,
+                Status = "pending",
+                RequestedDate = normalizedDate,
+                RequestedBy = requestedBy,
+                AttemptCount = 0,
+                LastError = null,
+                WorkerId = null,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ClaimedAt = null,
+                FinishedAt = null,
+            });
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return tenantIds.Count;
+    }
+
+    public async Task<object?> ClaimNextEdcScrapeJobAsync(string workerId, int staleAfterMinutes = 20, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var staleBefore = DateTimeOffset.UtcNow.AddMinutes(-Math.Max(1, staleAfterMinutes)).ToUnixTimeMilliseconds();
+
+        var nextJob = await db.EdcScrapeJobs
+            .Where(x =>
+                x.Status == "pending"
+                || (x.Status == "processing" && x.ClaimedAt.HasValue && x.ClaimedAt.Value < staleBefore))
+            .OrderBy(x => x.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (nextJob is null)
+        {
+            return null;
+        }
+
+        var credential = await db.TenantEdcCredentials.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.TenantId == nextJob.TenantId && x.IsEnabled, cancellationToken);
+
+        if (credential is null)
+        {
+            nextJob.Status = "error";
+            nextJob.LastError = "Chybi aktivni EDC credential pro tenanta.";
+            nextJob.UpdatedAt = now;
+            nextJob.FinishedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
+            return null;
+        }
+
+        string password;
+        try
+        {
+            password = SecurityUtils.DecryptAes(credential.EdcPasswordEncrypted, authOptions.Value.Pepper);
+        }
+        catch
+        {
+            nextJob.Status = "error";
+            nextJob.LastError = "Nelze desifrovat EDC credential heslo.";
+            nextJob.UpdatedAt = now;
+            nextJob.FinishedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
+            return null;
+        }
+
+        nextJob.Status = "processing";
+        nextJob.WorkerId = workerId;
+        nextJob.AttemptCount += 1;
+        nextJob.LastError = null;
+        nextJob.ClaimedAt = now;
+        nextJob.UpdatedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+
+        return new
+        {
+            jobId = nextJob.Id,
+            tenantId = nextJob.TenantId,
+            requestedDate = nextJob.RequestedDate,
+            credentials = new
+            {
+                email = credential.EdcEmail,
+                password,
+            },
+            attemptCount = nextJob.AttemptCount,
+            requestedBy = nextJob.RequestedBy,
+            createdAt = nextJob.CreatedAt,
+        };
+    }
+
+    public async Task<int?> GetEdcScrapeJobTenantIdAsync(long jobId, CancellationToken cancellationToken = default)
+    {
+        return await db.EdcScrapeJobs.AsNoTracking()
+            .Where(x => x.Id == jobId)
+            .Select(x => (int?)x.TenantId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task MarkEdcScrapeJobCompletedAsync(long jobId, CancellationToken cancellationToken = default)
+    {
+        var job = await db.EdcScrapeJobs.FirstOrDefaultAsync(x => x.Id == jobId, cancellationToken);
+        if (job is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        job.Status = "success";
+        job.LastError = null;
+        job.UpdatedAt = now;
+        job.FinishedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task MarkEdcScrapeJobFailedAsync(long jobId, string errorMessage, CancellationToken cancellationToken = default)
+    {
+        var job = await db.EdcScrapeJobs.FirstOrDefaultAsync(x => x.Id == jobId, cancellationToken);
+        if (job is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        job.Status = "error";
+        job.LastError = string.IsNullOrWhiteSpace(errorMessage) ? "Neznama chyba workeru." : errorMessage.Trim();
+        job.UpdatedAt = now;
+        job.FinishedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
     }
 }

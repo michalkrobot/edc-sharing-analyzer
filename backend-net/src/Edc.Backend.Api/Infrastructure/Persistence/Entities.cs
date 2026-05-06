@@ -168,3 +168,20 @@ public sealed class EdcImportHistory
     public int RecordCount { get; set; }
     public long ImportedAt { get; set; }
 }
+
+// Fronta pozadavku na EDC scraping pro externi worker
+public sealed class EdcScrapeJob
+{
+    public long Id { get; set; }
+    public int TenantId { get; set; }
+    public string Status { get; set; } = "pending"; // pending | processing | success | error
+    public string? RequestedDate { get; set; } // yyyy-MM-dd
+    public string? RequestedBy { get; set; }
+    public string? WorkerId { get; set; }
+    public int AttemptCount { get; set; }
+    public string? LastError { get; set; }
+    public long CreatedAt { get; set; }
+    public long UpdatedAt { get; set; }
+    public long? ClaimedAt { get; set; }
+    public long? FinishedAt { get; set; }
+}

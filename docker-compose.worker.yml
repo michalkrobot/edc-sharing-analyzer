@@ -1,0 +1,10 @@
+services:
+  edc-worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: edc-worker:latest
+    restart: unless-stopped
+    env_file:
+      - path: worker/.env
+        required: false
