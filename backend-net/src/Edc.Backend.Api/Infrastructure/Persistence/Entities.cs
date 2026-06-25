@@ -190,6 +190,17 @@ public sealed class EdcImportHistory
     public long ImportedAt { get; set; }
 }
 
+// Predpocitany payload pro verejne prehledy (uvodni stranka + embed enerkom-report).
+// Prepocita se po kazdem EDC importu tenanta – data se mezi importy nemeni, takze se
+// nemusi pri kazdem nacteni dotazovat velke tabulky edc_readings / edc_link_readings.
+public sealed class TenantSharingCache
+{
+    public int TenantId { get; set; }
+    public string PayloadJson { get; set; } = string.Empty;
+    public int IntervalCount { get; set; }
+    public long ComputedAt { get; set; }
+}
+
 // Fronta pozadavku na EDC scraping pro externi worker
 public sealed class EdcScrapeJob
 {
