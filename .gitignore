@@ -25,3 +25,16 @@ backend-net/src/Edc.Backend.Api/obj/
 # Local data directory
 data/
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Worker runtime state
+worker/state/
+
+# Debug/test screenshots
+*_screenshot.png
+fail_*.png
+test_*.png
+
