@@ -32,6 +32,8 @@ public interface IAppService
     Task<object> SaveEdcLinkImportAsync(string csvText, string filename, AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
     Task<object> BuildMemberSharingDataAsync(int userId, int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
     Task<object> BuildTenantFullSharingDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
+    Task<object?> BuildTenantSharingPayloadAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task<object?> BuildTenantSharingSummaryAsync(int tenantId, CancellationToken cancellationToken = default);
     Task<string?> GetTenantSharingDataJsonAsync(int tenantId, CancellationToken cancellationToken = default);
     Task<string?> RebuildTenantSharingCacheAsync(int tenantId, CancellationToken cancellationToken = default);
     Task<object> ResolveTenantScopeAsync(AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
@@ -1009,7 +1011,90 @@ public sealed class AppService(
         };
     }
 
-    // Vrati predpocitany JSON pro verejny prehled (uvodni stranka + embed enerkom-report).
+    // Plny payload (cela historie, per-EAN data + presne alokace) pro multi-ean-analyzer.
+    // Vraci null, kdyz tenant nema zadna EDC data. NEcachuje se – endpoint ho streamuje primo.
+    public async Task<object?> BuildTenantSharingPayloadAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        const long dateFrom = 0;
+        var dateTo = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds();
+        try
+        {
+            return await BuildTenantFullSharingDataAsync(tenantId, dateFrom, dateTo, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    // Lehky agregovany payload pro uvodni stranku + embed (enerkom-report2). Per interval jen
+    // souctove hodnoty (start + sumProduction/sumSharing/sumMissed), bez per-EAN poli a matice
+    // exactAllocations. Radove mensi nez plny payload, takze se bezpecne serializuje i cachuje.
+    public async Task<object?> BuildTenantSharingSummaryAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        const long dateFrom = 0;
+        var dateTo = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds();
+        var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(dateFrom);
+        var tsTo = DateTimeOffset.FromUnixTimeMilliseconds(dateTo);
+
+        var readings = await db.EdcReadings
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.TimeFrom >= tsFrom && x.TimeFrom < tsTo)
+            .OrderBy(x => x.TimeFrom)
+            .ToListAsync(cancellationToken);
+
+        if (readings.Count == 0)
+            return null;
+
+        var cs = StringComparer.Create(new CultureInfo("cs-CZ"), false);
+        var producerEans = readings.Where(x => x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+        var consumerEans = readings.Where(x => !x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+
+        var intervals = readings
+            .GroupBy(x => x.TimeFrom)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                double prodBefore = 0, prodAfter = 0, consBefore = 0, consAfter = 0;
+                foreach (var r in g)
+                {
+                    if (r.IsProducer) { prodBefore += r.KwhTotal; prodAfter += r.KwhRemainder; }
+                    else { consBefore += r.KwhTotal; consAfter += r.KwhRemainder; }
+                }
+                var sumProduction = prodBefore;
+                var sumSharing = Math.Min(Math.Max(0, prodBefore - prodAfter), Math.Max(0, consBefore - consAfter));
+                var sumMissed = prodAfter > 0.01 && consAfter > 0.01 ? Math.Min(prodAfter, consAfter) : 0d;
+                return new
+                {
+                    start = g.Key.ToUnixTimeMilliseconds(),
+                    sumProduction,
+                    sumSharing,
+                    sumMissed,
+                    // Celkova spotreba za interval (vsechny odberatele) – pro agregovane consumer grafy
+                    // na embed strance (enerkom-report); per-EAN rozpad se sem zamerne neprenasi.
+                    consumptionBefore = consBefore,
+                    consumptionAfter = consAfter,
+                };
+            }).ToList();
+
+        var importRow = await db.TenantEdcImports.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        var filename = importRow?.Filename ?? "edc.csv";
+
+        return new
+        {
+            data = new
+            {
+                filename,
+                producers = producerEans.Select((ean, idx) => new { name = ean, csvIndex = idx }).ToList(),
+                consumers = consumerEans.Select((ean, idx) => new { name = ean, csvIndex = idx }).ToList(),
+                intervals,
+                dateFrom,
+                dateTo,
+            },
+        };
+    }
+
+    // Vrati predpocitany agregovany JSON pro verejny prehled (uvodni stranka + embed enerkom-report2).
     // Pri cache miss dopocita a ulozi. Vraci null, pokud tenant nema zadna EDC data.
     public async Task<string?> GetTenantSharingDataJsonAsync(int tenantId, CancellationToken cancellationToken = default)
     {
@@ -1021,18 +1106,11 @@ public sealed class AppService(
         return await RebuildTenantSharingCacheAsync(tenantId, cancellationToken);
     }
 
-    // Prepocita a ulozi predpocitany payload. Vraci serializovany JSON (nebo null, kdyz nejsou data).
+    // Prepocita a ulozi predpocitany agregovany payload. Vraci serializovany JSON (nebo null, kdyz nejsou data).
     public async Task<string?> RebuildTenantSharingCacheAsync(int tenantId, CancellationToken cancellationToken = default)
     {
-        const long dateFrom = 0;
-        var dateTo = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds();
-
-        object payload;
-        try
-        {
-            payload = await BuildTenantFullSharingDataAsync(tenantId, dateFrom, dateTo, cancellationToken);
-        }
-        catch (InvalidOperationException)
+        var payload = await BuildTenantSharingSummaryAsync(tenantId, cancellationToken);
+        if (payload is null)
         {
             // Tenant nema zadna EDC data – odstranime pripadny zastaraly zaznam.
             await InvalidateTenantSharingCacheAsync(tenantId, cancellationToken);

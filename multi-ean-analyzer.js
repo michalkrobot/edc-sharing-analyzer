@@ -2720,6 +2720,30 @@ function computeAverageDay(intervals) {
 }
 
 function getChartIntervalsForCurrentMode(data, scopeMode = "auto") {
+  // Embed (enerkom-report) jede z agregovaneho summary payloadu – per-interval per-EAN pole
+  // (interval.producers/consumers) tu nejsou, takze grafy krmime souctovymi hodnotami intervalu.
+  if (pageMode === "enerkom-report") {
+    if (scopeMode === "consumer") {
+      return data.intervals.map((interval) => {
+        const before = Number(interval.consumptionBefore) || 0;
+        const after = Number(interval.consumptionAfter) || 0;
+        return {
+          start: interval.start,
+          sumProduction: 0,
+          sumSharing: Math.max(0, before - after),
+          consumers: [{ before }],
+        };
+      });
+    }
+    return data.intervals.map((interval) => ({
+      start: interval.start,
+      sumProduction: Number(interval.sumProduction) || 0,
+      sumSharing: Number(interval.sumSharing) || 0,
+      sumMissed: Number(interval.sumMissed) || 0,
+      consumers: [{ before: Number(interval.consumptionBefore) || 0 }],
+    }));
+  }
+
   if (scopeMode === "consumer") {
     const allConsumerIndexes = data.consumers.map((_consumer, index) => index);
 
@@ -4502,18 +4526,23 @@ function renderSharingPage(data) {
     }
   }
 
-  const { producerStats } = aggregateSummary(data);
-  if (dom.producerChart && !isMemberSharingPage) {
-    drawProducerOverviewChart(dom.producerChart, producerStats, null);
+  // Embed (enerkom-report) zobrazuje jen agregaty – per-EAN prehled vyroben a kolace podilu
+  // (potrebuji per-interval per-EAN data, ktera summary payload nenese) se vynechavaji.
+  const isAggregateEmbed = pageMode === "enerkom-report";
+  if (!isAggregateEmbed) {
+    const { producerStats } = aggregateSummary(data);
+    if (dom.producerChart && !isMemberSharingPage) {
+      drawProducerOverviewChart(dom.producerChart, producerStats, null);
+    }
+    renderProducerPieCharts(producerStats);
+    renderProducerConsumerPieCharts(data);
+    renderConsumerProducerPieCharts(data);
   }
   renderEmbedTenantTotals(data);
   renderEffTrendChart(data);
   renderActivityHeatmap(data);
   renderProducerDailyTotalsChart(data);
   renderConsumerDailyTotalsChart(data);
-  renderProducerPieCharts(producerStats);
-  renderProducerConsumerPieCharts(data);
-  renderConsumerProducerPieCharts(data);
   renderBestDayChart(data);
   renderConsumerBestDayChart(data);
   renderAverageDayChart(data);
@@ -4667,7 +4696,8 @@ async function loadEmbedTenantData() {
   }
 
   const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
-  const response = await fetch(`${apiBase}/public/tenant-sharing-data?tenantId=${encodeURIComponent(tenantId)}`, {
+  // Embed potrebuje jen agregaty → lehky summary payload z cache (ne plny per-EAN stream).
+  const response = await fetch(`${apiBase}/public/tenant-sharing-summary?tenantId=${encodeURIComponent(tenantId)}`, {
     method: "GET",
   });
 
@@ -4905,6 +4935,9 @@ function hydrateServerSharingData(payload) {
     sumProduction: Number(interval.sumProduction) || 0,
     sumSharing: Number(interval.sumSharing) || 0,
     sumMissed: Number(interval.sumMissed) || 0,
+    // Agregovana spotreba (jen embed/enerkom-report summary payload; u plneho payloadu chybi).
+    consumptionBefore: Number(interval.consumptionBefore) || 0,
+    consumptionAfter: Number(interval.consumptionAfter) || 0,
   }));
 
   const fallbackFrom = intervals.length > 0 ? intervals[0].start : new Date();
