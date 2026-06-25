@@ -7,7 +7,8 @@ public sealed record PlannerEanDto(
     bool IsSynthetic,
     double? InstalledKw,
     double? AnnualKwh,
-    string? TdzCategory);
+    string? TdzCategory,
+    bool IsManual = false);
 
 public sealed record PriorityLinkDto(
     string ProducerEan,
@@ -27,3 +28,6 @@ public sealed record UpsertSyntheticEanRequest(
 public sealed record AddPriorityLinkRequest(
     string ProducerEan,
     string ConsumerEan);
+
+public sealed record SetGroupEdcIdRequest(
+    string? EdcGroupId);

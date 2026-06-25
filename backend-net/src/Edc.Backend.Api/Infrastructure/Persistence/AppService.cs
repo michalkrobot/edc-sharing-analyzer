@@ -38,11 +38,13 @@ public interface IAppService
     Task<object> SaveTenantDefinitionAsync(JsonElement input, CancellationToken cancellationToken = default);
     Task<object> GetMembersAsync(AuthPrincipal auth, string? tenantId, CancellationToken cancellationToken = default);
     Task<List<object>> GetSharingGroupsAsync(AuthPrincipal auth, CancellationToken cancellationToken = default);
-    Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
+    Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, int? sharingGroupId = null, CancellationToken cancellationToken = default);
 
     // Allocation planner
-    Task<List<PlannerEanDto>> GetPlannerEansAsync(int tenantId, CancellationToken cancellationToken = default);
-    Task UpsertSyntheticEanAsync(int tenantId, UpsertSyntheticEanRequest req, CancellationToken cancellationToken = default);
+    Task<List<PlannerEanDto>> GetPlannerEansAsync(int tenantId, int? sharingGroupId = null, CancellationToken cancellationToken = default);
+    Task<List<object>> GetPlannerGroupsAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task SetSharingGroupEdcIdAsync(int tenantId, int sharingGroupId, string? edcGroupId, CancellationToken cancellationToken = default);
+    Task UpsertSyntheticEanAsync(int tenantId, UpsertSyntheticEanRequest req, int? sharingGroupId = null, CancellationToken cancellationToken = default);
     Task DeleteSyntheticEanAsync(int tenantId, string ean, CancellationToken cancellationToken = default);
     Task<List<PriorityLinkDto>> GetPriorityLinksAsync(int tenantId, CancellationToken cancellationToken = default);
     Task AddPriorityLinkAsync(int tenantId, string producerEan, string consumerEan, CancellationToken cancellationToken = default);
@@ -333,8 +335,16 @@ public sealed class AppService(
         var mappedCount = 0;
         var unmatched = new HashSet<string>();
 
+        static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        var groupNames = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var row in rows)
         {
+            var currentGroup = Trimmed(row.CurrentGroup);
+            var plannedGroup = Trimmed(row.PlannedGroup);
+            if (currentGroup is not null) groupNames.Add(currentGroup);
+            if (plannedGroup is not null) groupNames.Add(plannedGroup);
+
             var tenantEan = await db.TenantEans.FirstOrDefaultAsync(x => x.TenantId == tenant.Id && x.Ean == row.Ean, cancellationToken);
             if (tenantEan is null)
             {
@@ -346,6 +356,13 @@ public sealed class AppService(
                     MemberName = row.MemberName,
                     IsPublic = row.IsPublic ? 1 : 0,
                     ImportedAt = now,
+                    CurrentGroupName = currentGroup,
+                    PlannedGroupName = plannedGroup,
+                    IsProducer = row.IsProducer,
+                    SourceType = Trimmed(row.SourceType),
+                    InstalledKw = row.InstalledKw,
+                    ExpectedKw = row.ExpectedKw,
+                    AnnualKwh = row.AnnualKwh,
                 });
             }
             else
@@ -354,6 +371,13 @@ public sealed class AppService(
                 tenantEan.MemberName = row.MemberName;
                 tenantEan.IsPublic = row.IsPublic ? 1 : 0;
                 tenantEan.ImportedAt = now;
+                tenantEan.CurrentGroupName = currentGroup;
+                tenantEan.PlannedGroupName = plannedGroup;
+                tenantEan.IsProducer = row.IsProducer;
+                tenantEan.SourceType = Trimmed(row.SourceType);
+                tenantEan.InstalledKw = row.InstalledKw;
+                tenantEan.ExpectedKw = row.ExpectedKw;
+                tenantEan.AnnualKwh = row.AnnualKwh;
             }
 
             if (!usersByName.TryGetValue(row.NormalizedMemberName, out var matchedUsers) || matchedUsers.Count == 0)
@@ -383,6 +407,28 @@ public sealed class AppService(
                     userEan.ImportedAt = now;
                 }
                 mappedCount++;
+            }
+        }
+
+        // Založ skupiny sdílení odvozené z názvů v eany.csv (pod tímto tenantem).
+        // EdcGroupId se přiřadí později v administraci při párování s EDC daty.
+        if (groupNames.Count > 0)
+        {
+            var existingGroups = await db.SharingGroups
+                .Where(x => x.TenantId == tenant.Id)
+                .Select(x => x.Name)
+                .ToListAsync(cancellationToken);
+            var existingSet = new HashSet<string>(existingGroups, StringComparer.Ordinal);
+
+            foreach (var name in groupNames.Where(n => !existingSet.Contains(n)))
+            {
+                db.SharingGroups.Add(new SharingGroup
+                {
+                    TenantId = tenant.Id,
+                    Name = name,
+                    EdcGroupId = null,
+                    CreatedAt = now,
+                });
             }
         }
 
@@ -943,7 +989,7 @@ public sealed class AppService(
         };
     }
 
-    public async Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default)
+    public async Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, int? sharingGroupId = null, CancellationToken cancellationToken = default)
     {
         var tsFrom = DateTimeOffset.FromUnixTimeMilliseconds(dateFrom);
         var tsTo = DateTimeOffset.FromUnixTimeMilliseconds(dateTo);
@@ -981,8 +1027,85 @@ public sealed class AppService(
         }
 
         var cs = StringComparer.Create(new CultureInfo("cs-CZ"), false);
-        var producerEans = readings.Where(x => x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
-        var consumerEans = readings.Where(x => !x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+        var realEanSet = new HashSet<string>(readings.Select(x => x.Ean), StringComparer.Ordinal);
+
+        List<string> producerEans;
+        List<string> consumerEans;
+        List<SyntheticEan> syntheticProducers;
+        List<SyntheticEan> syntheticConsumers;
+
+        if (sharingGroupId is { } gid)
+        {
+            // Group-driven planner mode: the EAN universe is the planned membership from eany.csv.
+            // Real EDC readings (grid + values) come from the whole tenant; only member EANs are exposed.
+            // Members without real readings are estimated from their planning attributes.
+            var group = await db.SharingGroups.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == gid && x.TenantId == tenantId, cancellationToken)
+                ?? throw new InvalidOperationException("Skupina sdílení nebyla nalezena.");
+
+            var members = await db.TenantEans.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && x.PlannedGroupName == group.Name)
+                .ToListAsync(cancellationToken);
+
+            if (members.Count == 0)
+                throw new InvalidOperationException("Vybraná skupina nemá žádné plánované EAN (zkontrolujte sloupec \"skupina - planovana\" v eany.csv).");
+
+            var realProducerSet = new HashSet<string>(readings.Where(x => x.IsProducer).Select(x => x.Ean), StringComparer.Ordinal);
+
+            SyntheticEan ToSynth(TenantEan m, bool isProd) => new()
+            {
+                TenantId = tenantId,
+                Ean = m.Ean,
+                Label = m.Label,
+                IsProducer = isProd,
+                InstalledKw = m.InstalledKw,
+                AnnualKwh = m.AnnualKwh,
+                TdzCategory = string.Empty,
+            };
+
+            var prodMembers = members.Where(m => m.IsProducer ?? realProducerSet.Contains(m.Ean)).ToList();
+            var consMembers = members.Where(m => !(m.IsProducer ?? realProducerSet.Contains(m.Ean))).ToList();
+
+            producerEans = prodMembers.Where(m => realEanSet.Contains(m.Ean)).Select(m => m.Ean).OrderBy(x => x, cs).ToList();
+            consumerEans = consMembers.Where(m => realEanSet.Contains(m.Ean)).Select(m => m.Ean).OrderBy(x => x, cs).ToList();
+
+            syntheticProducers = prodMembers.Where(m => !realEanSet.Contains(m.Ean)).OrderBy(m => m.Ean, cs).Select(m => ToSynth(m, true)).ToList();
+            syntheticConsumers = consMembers.Where(m => !realEanSet.Contains(m.Ean)).OrderBy(m => m.Ean, cs).Select(m => ToSynth(m, false)).ToList();
+
+            // Manuálně přidané syntetické EANy navázané na tuto skupinu (mimo eany.csv, bez reálných dat).
+            var memberEanSet = new HashSet<string>(members.Select(m => m.Ean), StringComparer.Ordinal);
+            var manualSynthetic = await db.SyntheticEans.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && x.SharingGroupId == gid)
+                .ToListAsync(cancellationToken);
+            foreach (var s in manualSynthetic.Where(s => !memberEanSet.Contains(s.Ean) && !realEanSet.Contains(s.Ean)))
+            {
+                if (s.IsProducer) syntheticProducers.Add(s);
+                else syntheticConsumers.Add(s);
+            }
+        }
+        else
+        {
+            producerEans = readings.Where(x => x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+            consumerEans = readings.Where(x => !x.IsProducer).Select(x => x.Ean).Distinct().OrderBy(x => x, cs).ToList();
+
+            // Load synthetic EANs – use only those without real readings in this period
+            var syntheticEans = await db.SyntheticEans
+                .AsNoTracking()
+                .Where(x => x.TenantId == tenantId)
+                .ToListAsync(cancellationToken);
+
+            syntheticProducers = syntheticEans
+                .Where(x => x.IsProducer && !realEanSet.Contains(x.Ean))
+                .OrderBy(x => x.Ean, cs)
+                .ToList();
+            syntheticConsumers = syntheticEans
+                .Where(x => !x.IsProducer && !realEanSet.Contains(x.Ean))
+                .OrderBy(x => x.Ean, cs)
+                .ToList();
+        }
+
+        foreach (var s in syntheticProducers) producerEans.Add(s.Ean);
+        foreach (var s in syntheticConsumers) consumerEans.Add(s.Ean);
 
         if (producerEans.Count == 0 || consumerEans.Count == 0)
             throw new InvalidOperationException("Pro tuto skupinu sdílení nejsou v daném období EDC data.");
@@ -997,29 +1120,6 @@ public sealed class AppService(
 
         var linksByTime = linkReadings.GroupBy(x => x.TimeFrom).ToDictionary(x => x.Key, x => x.ToList());
         var hasExactAllocations = linkReadings.Count > 0;
-
-        // Load synthetic EANs – use only those without real readings in this period
-        var syntheticEans = await db.SyntheticEans
-            .AsNoTracking()
-            .Where(x => x.TenantId == tenantId)
-            .ToListAsync(cancellationToken);
-
-        var realEanSet = new HashSet<string>(readings.Select(x => x.Ean), StringComparer.Ordinal);
-        var syntheticProducers = syntheticEans
-            .Where(x => x.IsProducer && !realEanSet.Contains(x.Ean))
-            .OrderBy(x => x.Ean, cs)
-            .ToList();
-        var syntheticConsumers = syntheticEans
-            .Where(x => !x.IsProducer && !realEanSet.Contains(x.Ean))
-            .OrderBy(x => x.Ean, cs)
-            .ToList();
-
-        foreach (var s in syntheticProducers) producerEans.Add(s.Ean);
-        foreach (var s in syntheticConsumers) consumerEans.Add(s.Ean);
-
-        // Rebuild indices after adding synthetic EANs
-        producerIndexByEan = producerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
-        consumerIndexByEan = consumerEans.Select((e, i) => (e, i)).ToDictionary(x => x.e, x => x.i, StringComparer.Ordinal);
 
         var syntheticProducerDict = syntheticProducers.ToDictionary(x => x.Ean, StringComparer.Ordinal);
         var syntheticConsumerDict = syntheticConsumers.ToDictionary(x => x.Ean, StringComparer.Ordinal);
@@ -1732,8 +1832,16 @@ public sealed class AppService(
 
     // ── Allocation Planner ───────────────────────────────────────────────────
 
-    public async Task<List<PlannerEanDto>> GetPlannerEansAsync(int tenantId, CancellationToken cancellationToken = default)
+    public async Task<List<PlannerEanDto>> GetPlannerEansAsync(int tenantId, int? sharingGroupId = null, CancellationToken cancellationToken = default)
     {
+        // Group-driven mode: the EAN universe is the planned membership from eany.csv
+        // (tenant_eans.PlannedGroupName == selected group). Real EDC data takes precedence;
+        // EANs without readings are estimated from their planning attributes (synthetic).
+        if (sharingGroupId is { } groupId)
+        {
+            return await GetPlannerEansForGroupAsync(tenantId, groupId, cancellationToken);
+        }
+
         var syntheticEans = await db.SyntheticEans
             .AsNoTracking()
             .Where(x => x.TenantId == tenantId)
@@ -1762,13 +1870,111 @@ public sealed class AppService(
 
         // Synthetic EANs
         foreach (var s in syntheticEans)
-            result.Add(new PlannerEanDto(s.Ean, s.Label, s.IsProducer, true, s.InstalledKw, s.AnnualKwh, s.TdzCategory));
+            result.Add(new PlannerEanDto(s.Ean, s.Label, s.IsProducer, true, s.InstalledKw, s.AnnualKwh, s.TdzCategory, IsManual: true));
 
         return result.OrderBy(x => x.IsProducer ? 0 : 1).ThenBy(x => x.Label).ToList();
     }
 
-    public async Task UpsertSyntheticEanAsync(int tenantId, UpsertSyntheticEanRequest req, CancellationToken cancellationToken = default)
+    private async Task<List<PlannerEanDto>> GetPlannerEansForGroupAsync(int tenantId, int sharingGroupId, CancellationToken cancellationToken)
     {
+        var group = await db.SharingGroups.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == sharingGroupId && x.TenantId == tenantId, cancellationToken)
+            ?? throw new InvalidOperationException("Skupina sdílení nebyla nalezena.");
+
+        var members = await db.TenantEans.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.PlannedGroupName == group.Name)
+            .ToListAsync(cancellationToken);
+
+        // Which of these EANs have real EDC readings (and as producer or consumer)?
+        var memberEans = members.Select(x => x.Ean).ToList();
+        var realProducerSet = new HashSet<string>(
+            await db.EdcReadings.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && x.IsProducer && memberEans.Contains(x.Ean))
+                .Select(x => x.Ean).Distinct().ToListAsync(cancellationToken),
+            StringComparer.Ordinal);
+        var realConsumerSet = new HashSet<string>(
+            await db.EdcReadings.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && !x.IsProducer && memberEans.Contains(x.Ean))
+                .Select(x => x.Ean).Distinct().ToListAsync(cancellationToken),
+            StringComparer.Ordinal);
+
+        var result = new List<PlannerEanDto>();
+        var memberEanSet = new HashSet<string>(memberEans, StringComparer.Ordinal);
+        foreach (var m in members)
+        {
+            var hasReal = realProducerSet.Contains(m.Ean) || realConsumerSet.Contains(m.Ean);
+            // Producer/consumer: prefer explicit flag from eany.csv, else infer from real readings.
+            var isProducer = m.IsProducer ?? realProducerSet.Contains(m.Ean);
+            result.Add(new PlannerEanDto(
+                m.Ean,
+                string.IsNullOrWhiteSpace(m.Label) ? m.Ean : m.Label,
+                isProducer,
+                IsSynthetic: !hasReal,
+                m.InstalledKw,
+                m.AnnualKwh,
+                TdzCategory: null));
+        }
+
+        // Manuálně přidané syntetické EANy navázané na tuto skupinu (mimo eany.csv).
+        var manualSynthetic = await db.SyntheticEans.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.SharingGroupId == sharingGroupId)
+            .ToListAsync(cancellationToken);
+        foreach (var s in manualSynthetic.Where(s => !memberEanSet.Contains(s.Ean)))
+        {
+            result.Add(new PlannerEanDto(
+                s.Ean, s.Label, s.IsProducer, IsSynthetic: true,
+                s.InstalledKw, s.AnnualKwh, s.TdzCategory, IsManual: true));
+        }
+
+        return result.OrderBy(x => x.IsProducer ? 0 : 1).ThenBy(x => x.Label).ToList();
+    }
+
+    public async Task<List<object>> GetPlannerGroupsAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        var groups = await db.SharingGroups.AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var members = await db.TenantEans.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.PlannedGroupName != null)
+            .Select(x => new { x.PlannedGroupName, x.IsProducer })
+            .ToListAsync(cancellationToken);
+
+        return groups.Select(g =>
+        {
+            var groupMembers = members.Where(m => m.PlannedGroupName == g.Name).ToList();
+            return (object)new
+            {
+                id = g.Id,
+                name = g.Name,
+                edcGroupId = g.EdcGroupId,
+                producerCount = groupMembers.Count(m => m.IsProducer == true),
+                consumerCount = groupMembers.Count(m => m.IsProducer == false),
+                memberCount = groupMembers.Count,
+            };
+        }).ToList();
+    }
+
+    public async Task SetSharingGroupEdcIdAsync(int tenantId, int sharingGroupId, string? edcGroupId, CancellationToken cancellationToken = default)
+    {
+        var group = await db.SharingGroups
+            .FirstOrDefaultAsync(x => x.Id == sharingGroupId && x.TenantId == tenantId, cancellationToken)
+            ?? throw new InvalidOperationException("Skupina sdílení nebyla nalezena.");
+
+        group.EdcGroupId = string.IsNullOrWhiteSpace(edcGroupId) ? null : edcGroupId.Trim();
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UpsertSyntheticEanAsync(int tenantId, UpsertSyntheticEanRequest req, int? sharingGroupId = null, CancellationToken cancellationToken = default)
+    {
+        if (sharingGroupId is { } gid)
+        {
+            var groupExists = await db.SharingGroups.AnyAsync(x => x.Id == gid && x.TenantId == tenantId, cancellationToken);
+            if (!groupExists)
+                throw new InvalidOperationException("Skupina sdílení nebyla nalezena.");
+        }
+
         var existing = await db.SyntheticEans
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Ean == req.Ean, cancellationToken);
 
@@ -1781,6 +1987,7 @@ public sealed class AppService(
             existing.InstalledKw = req.InstalledKw;
             existing.AnnualKwh = req.AnnualKwh;
             existing.TdzCategory = req.TdzCategory;
+            existing.SharingGroupId = sharingGroupId;
         }
         else
         {
@@ -1794,6 +2001,7 @@ public sealed class AppService(
                 AnnualKwh = req.AnnualKwh,
                 TdzCategory = req.TdzCategory,
                 CreatedAt = now,
+                SharingGroupId = sharingGroupId,
             });
         }
 

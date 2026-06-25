@@ -11,6 +11,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<UserEan> UserEans => Set<UserEan>();
     public DbSet<TenantAdmin> TenantAdmins => Set<TenantAdmin>();
     public DbSet<TenantEan> TenantEans => Set<TenantEan>();
+    public DbSet<SharingGroup> SharingGroups => Set<SharingGroup>();
     public DbSet<TenantEdcImport> TenantEdcImports => Set<TenantEdcImport>();
     public DbSet<TenantEdcLinkImport> TenantEdcLinkImports => Set<TenantEdcLinkImport>();
     public DbSet<EdcReading> EdcReadings => Set<EdcReading>();
@@ -81,6 +82,22 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         modelBuilder.Entity<TenantEan>().Property(x => x.MemberName).HasColumnName("member_name");
         modelBuilder.Entity<TenantEan>().Property(x => x.IsPublic).HasColumnName("is_public");
         modelBuilder.Entity<TenantEan>().Property(x => x.ImportedAt).HasColumnName("imported_at");
+        modelBuilder.Entity<TenantEan>().Property(x => x.CurrentGroupName).HasColumnName("current_group_name");
+        modelBuilder.Entity<TenantEan>().Property(x => x.PlannedGroupName).HasColumnName("planned_group_name");
+        modelBuilder.Entity<TenantEan>().Property(x => x.IsProducer).HasColumnName("is_producer");
+        modelBuilder.Entity<TenantEan>().Property(x => x.SourceType).HasColumnName("source_type");
+        modelBuilder.Entity<TenantEan>().Property(x => x.InstalledKw).HasColumnName("installed_kw");
+        modelBuilder.Entity<TenantEan>().Property(x => x.ExpectedKw).HasColumnName("expected_kw");
+        modelBuilder.Entity<TenantEan>().Property(x => x.AnnualKwh).HasColumnName("annual_kwh");
+
+        modelBuilder.Entity<SharingGroup>().ToTable("sharing_groups");
+        modelBuilder.Entity<SharingGroup>().HasKey(x => x.Id);
+        modelBuilder.Entity<SharingGroup>().Property(x => x.Id).HasColumnName("id").UseIdentityColumn();
+        modelBuilder.Entity<SharingGroup>().Property(x => x.TenantId).HasColumnName("tenant_id");
+        modelBuilder.Entity<SharingGroup>().Property(x => x.Name).HasColumnName("name");
+        modelBuilder.Entity<SharingGroup>().Property(x => x.EdcGroupId).HasColumnName("edc_group_id");
+        modelBuilder.Entity<SharingGroup>().Property(x => x.CreatedAt).HasColumnName("created_at");
+        modelBuilder.Entity<SharingGroup>().HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
 
         modelBuilder.Entity<TenantEdcImport>().ToTable("tenant_edc_imports");
         modelBuilder.Entity<TenantEdcImport>().HasKey(x => x.TenantId);
@@ -130,6 +147,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         modelBuilder.Entity<SyntheticEan>().Property(x => x.AnnualKwh).HasColumnName("annual_kwh");
         modelBuilder.Entity<SyntheticEan>().Property(x => x.TdzCategory).HasColumnName("tdz_category");
         modelBuilder.Entity<SyntheticEan>().Property(x => x.CreatedAt).HasColumnName("created_at");
+        modelBuilder.Entity<SyntheticEan>().Property(x => x.SharingGroupId).HasColumnName("sharing_group_id");
 
         modelBuilder.Entity<PriorityLink>().ToTable("priority_links");
         modelBuilder.Entity<PriorityLink>().HasKey(x => new { x.TenantId, x.ProducerEan, x.ConsumerEan });

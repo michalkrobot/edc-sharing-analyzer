@@ -33,7 +33,8 @@ public sealed record StartSimulationRequest(
     int MaxFails,
     int Restarts,
     HistoricalWeights? Weights,
-    List<List<double>>? AllocationMatrix = null);
+    List<List<double>>? AllocationMatrix = null,
+    int? PlannerGroupId = null);
 
 public sealed record IntervalTotal(string Label, double Production, double Consumption, double Shared);
 

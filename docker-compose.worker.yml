@@ -8,3 +8,5 @@ services:
     env_file:
       - path: worker/.env
         required: false
+    volumes:
+      - ./worker/state:/app/state
