@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace Edc.Backend.Api.Infrastructure.Csv;
@@ -60,23 +62,27 @@ public sealed class CsvParser : ICsvParser
 
     public List<ParsedEanRow> ParseEansCsv(string csvText)
     {
-        var lines = (csvText ?? string.Empty)
-            .Replace("\r\n", "\n")
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => x.TrimEnd())
-            .Where(x => x.Length > 0)
-            .ToList();
+        // Record-oriented split: a quoted field may contain embedded newlines, so we
+        // cannot split on '\n' blindly the way a naive line parser would.
+        var records = SplitCsvRecords(csvText ?? string.Empty);
 
-        if (lines.Count < 2)
+        if (records.Count < 2)
         {
             throw new InvalidOperationException("Soubor EAN neobsahuje zadna data.");
         }
 
-        var headers = CsvUtils.ParseSemicolonCsvLine(lines[0]).Select(CsvUtils.NormalizeHeader).ToList();
+        var headers = CsvUtils.ParseSemicolonCsvLine(records[0]).Select(CsvUtils.NormalizeHeader).ToList();
         var eanIndex = headers.IndexOf("ean");
         var aliasIndex = headers.IndexOf("alias");
         var memberNameIndex = headers.IndexOf("jmeno clena");
         var publicIndex = headers.FindIndex(h => h is "public" or "verejny" or "is_public");
+        var currentGroupIndex = headers.IndexOf("skupina");
+        var plannedGroupIndex = headers.IndexOf("skupina - planovana");
+        var typeIndex = headers.IndexOf("typ");
+        var sourceTypeIndex = headers.IndexOf("typ zdroje");
+        var installedKwIndex = headers.IndexOf("instalovany vykon");
+        var expectedKwIndex = headers.IndexOf("predpokladany vykon");
+        var annualKwhIndex = headers.IndexOf("rocni spotreba elektricke energie v kwh");
 
         if (eanIndex < 0)
         {
@@ -88,14 +94,17 @@ public sealed class CsvParser : ICsvParser
             throw new InvalidOperationException("V souboru chybi sloupec jmeno clena.");
         }
 
+        string Field(List<string> parts, int index) =>
+            index >= 0 ? (parts.ElementAtOrDefault(index) ?? string.Empty).Trim() : string.Empty;
+
         var result = new List<ParsedEanRow>();
-        for (var i = 1; i < lines.Count; i++)
+        for (var i = 1; i < records.Count; i++)
         {
-            var parts = CsvUtils.ParseSemicolonCsvLine(lines[i]);
+            var parts = CsvUtils.ParseSemicolonCsvLine(records[i]);
             var ean = CsvUtils.NormalizeEan(parts.ElementAtOrDefault(eanIndex));
-            var memberName = (parts.ElementAtOrDefault(memberNameIndex) ?? string.Empty).Trim();
-            var alias = aliasIndex >= 0 ? (parts.ElementAtOrDefault(aliasIndex) ?? string.Empty).Trim() : string.Empty;
-            var publicRaw = publicIndex >= 0 ? (parts.ElementAtOrDefault(publicIndex) ?? string.Empty).Trim().ToLowerInvariant() : string.Empty;
+            var memberName = Field(parts, memberNameIndex);
+            var alias = Field(parts, aliasIndex);
+            var publicRaw = Field(parts, publicIndex).ToLowerInvariant();
             var isPublic = publicRaw is "1" or "true" or "ano" or "yes" or "y";
 
             if (string.IsNullOrWhiteSpace(ean) || string.IsNullOrWhiteSpace(memberName))
@@ -103,16 +112,82 @@ public sealed class CsvParser : ICsvParser
                 continue;
             }
 
+            var typNorm = CsvUtils.NormalizeHeader(Field(parts, typeIndex));
+            bool? isProducer = typNorm.StartsWith("vyrob", StringComparison.Ordinal) ? true
+                : typNorm.StartsWith("spotreb", StringComparison.Ordinal) ? false
+                : null;
+
             result.Add(new ParsedEanRow(
                 ean,
                 string.IsNullOrWhiteSpace(alias) ? memberName : alias,
                 memberName,
                 isPublic,
-                CsvUtils.NormalizeName(memberName)
+                CsvUtils.NormalizeName(memberName),
+                Field(parts, currentGroupIndex),
+                Field(parts, plannedGroupIndex),
+                isProducer,
+                Field(parts, sourceTypeIndex),
+                ParseNullableDouble(Field(parts, installedKwIndex)),
+                ParseNullableDouble(Field(parts, expectedKwIndex)),
+                ParseNullableDouble(Field(parts, annualKwhIndex))
             ));
         }
 
         return result;
+    }
+
+    // Splits CSV text into logical records, honoring double quotes so that newlines
+    // inside a quoted field do not break a record apart. Escaped quotes ("") inside a
+    // quoted field net to no state change, so they are preserved for ParseSemicolonCsvLine.
+    private static List<string> SplitCsvRecords(string text)
+    {
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var records = new List<string>();
+        var sb = new StringBuilder();
+        var inQuotes = false;
+
+        foreach (var ch in normalized)
+        {
+            if (ch == '"')
+            {
+                inQuotes = !inQuotes;
+                sb.Append(ch);
+                continue;
+            }
+
+            if (ch == '\n' && !inQuotes)
+            {
+                if (sb.ToString().Trim().Length > 0)
+                {
+                    records.Add(sb.ToString());
+                }
+                sb.Clear();
+                continue;
+            }
+
+            sb.Append(ch);
+        }
+
+        if (sb.ToString().Trim().Length > 0)
+        {
+            records.Add(sb.ToString());
+        }
+
+        return records;
+    }
+
+    private static double? ParseNullableDouble(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return null;
+        }
+
+        // Strip spaces (incl. non-breaking U+00A0) used as thousands separators; use '.' as decimal point.
+        var normalized = input.Trim().Replace(" ", string.Empty).Replace(" ", string.Empty).Replace(',', '.');
+        return double.TryParse(normalized, NumberStyles.Any, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
     }
 
     public ParsedEdcPayload ParseEdcCsv(string csvText, string filename)

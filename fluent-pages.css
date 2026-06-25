@@ -1,0 +1,219 @@
+:root {
+  --fluent-font: "Segoe UI Variable", "Segoe UI", "Selawik", -apple-system, sans-serif;
+  --fluent-bg: #f3f2f1;
+  --fluent-surface: #ffffff;
+  --fluent-surface-soft: #faf9f8;
+  --fluent-border: #e1dfdd;
+  --fluent-border-strong: #c8c6c4;
+  --fluent-text: #242424;
+  --fluent-text-muted: #605e5c;
+  --fluent-brand: #2f7d32;
+  --fluent-brand-strong: #1f5e24;
+  --fluent-ok: #107c10;
+  --fluent-warn: #8a3700;
+  --fluent-radius: 12px;
+  --fluent-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+body[data-page] {
+  font-family: var(--fluent-font);
+  color: var(--fluent-text);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(47, 125, 50, 0.16), transparent 34%),
+    radial-gradient(circle at 88% 10%, rgba(245, 158, 11, 0.12), transparent 28%),
+    linear-gradient(180deg, #faf9f8 0%, var(--fluent-bg) 60%);
+}
+
+body[data-page].fluent-embedded {
+  background: var(--fluent-bg);
+}
+
+body[data-page] .bg-shape {
+  opacity: 0.2;
+  filter: blur(54px);
+}
+
+body[data-page] .app-shell {
+  width: min(1240px, 95vw);
+}
+
+body[data-page].fluent-embedded .app-shell,
+body[data-page][data-embedded="true"] .app-shell {
+  width: min(1320px, 99vw);
+  margin-top: 0.75rem;
+}
+
+body[data-page] .card,
+body[data-page] .kpi-card {
+  border: 1px solid var(--fluent-border);
+  border-radius: var(--fluent-radius);
+  background: var(--fluent-surface);
+  box-shadow: var(--fluent-shadow);
+}
+
+body[data-page] .hero,
+body[data-page] .enerkom-site-header {
+  border: 1px solid var(--fluent-border);
+  border-radius: var(--fluent-radius);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(250, 252, 254, 0.96));
+}
+
+body[data-page] h1,
+body[data-page] h2,
+body[data-page] h3 {
+  color: #201f1e;
+}
+
+body[data-page] .status,
+body[data-page] .section-description,
+body[data-page] .muted,
+body[data-page] .hero-text,
+body[data-page] p {
+  color: var(--fluent-text-muted);
+}
+
+body[data-page] .sharing-section-chip,
+body[data-page] .edc-badge {
+  border: 1px solid #b7d9b4;
+  background: #eef7ee;
+  color: #1f5e24;
+}
+
+body[data-page] button,
+body[data-page] .btn,
+body[data-page] .btn-primary,
+body[data-page] .btn-secondary,
+body[data-page] .btn-ghost {
+  font-family: var(--fluent-font);
+}
+
+body[data-page] .btn-primary,
+body[data-page] button.btn-primary,
+body[data-page] button#runSimBtn,
+body[data-page] button#runTestBtn,
+body[data-page] button#simulateBtn,
+body[data-page] button#exportEdcBtn,
+body[data-page] #addLinkBtn {
+  background: linear-gradient(180deg, #2f7d32, #1f5e24);
+  border: 1px solid #2f7d32;
+  color: #ffffff;
+  border-radius: 8px;
+}
+
+body[data-page] .btn-primary:hover,
+body[data-page] button.btn-primary:hover,
+body[data-page] button#runSimBtn:hover,
+body[data-page] button#runTestBtn:hover,
+body[data-page] button#simulateBtn:hover,
+body[data-page] button#exportEdcBtn:hover,
+body[data-page] #addLinkBtn:hover {
+  background: linear-gradient(180deg, #1f5e24, #18491b);
+}
+
+body[data-page] .btn-ghost,
+body[data-page] .btn-secondary,
+body[data-page] button:not(.btn-primary) {
+  border: 1px solid var(--fluent-border-strong);
+  border-radius: 8px;
+  background: var(--fluent-surface-soft);
+  color: #323130;
+}
+
+body[data-page] input,
+body[data-page] select,
+body[data-page] textarea,
+body[data-page] progress {
+  border: 1px solid var(--fluent-border-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--fluent-text);
+}
+
+body[data-page] input:focus,
+body[data-page] select:focus,
+body[data-page] textarea:focus,
+body[data-page] button:focus-visible {
+  outline: 3px solid rgba(47, 125, 50, 0.45);
+  outline-offset: 1px;
+  border-color: #1f5e24;
+}
+
+body[data-page] button,
+body[data-page] input,
+body[data-page] select,
+body[data-page] textarea,
+body[data-page] a {
+  color: var(--fluent-text);
+}
+
+body[data-page] a:focus-visible {
+  outline: 3px solid rgba(47, 125, 50, 0.45);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+body[data-page] .table-wrap table,
+body[data-page] table.hist,
+body[data-page] .meta-table {
+  border-color: var(--fluent-border);
+}
+
+body[data-page] .dash-kpi-card--green,
+body[data-page] .kpi-card.green {
+  border-top-color: #107c10;
+}
+
+body[data-page] .dash-kpi-card--amber,
+body[data-page] .kpi-card.amber {
+  border-top-color: #8a3700;
+}
+
+body[data-page] .dash-kpi-card--teal,
+body[data-page] .kpi-card.teal {
+  border-top-color: #005b70;
+}
+
+body[data-page] .dash-kpi-card--brand,
+body[data-page] .kpi-card.indigo,
+body[data-page] .kpi-card.purple {
+  border-top-color: #0f6cbd;
+}
+
+body[data-page="enerkom-report2"] {
+  padding-top: 14px;
+}
+
+body[data-page="enerkom-report2"] .container {
+  max-width: 1140px;
+}
+
+body[data-page="enerkom-report2"] .page-header,
+body[data-page="enerkom-report2"] .info-bar,
+body[data-page="enerkom-report2"] .card,
+body[data-page="enerkom-report2"] .kpi-card {
+  border: 1px solid var(--fluent-border);
+  box-shadow: var(--fluent-shadow);
+  border-radius: var(--fluent-radius);
+}
+
+body[data-page="enerkom-report2"] .kpi-card {
+  border-top-width: 4px;
+}
+
+body[data-page="enerkom-report2"] .state-msg.error,
+body[data-page] .status.error,
+body[data-page] .status--error {
+  color: #a4262c;
+}
+
+@media (max-width: 768px) {
+  body[data-page] .app-shell {
+    width: min(1240px, 97vw);
+  }
+
+  body[data-page] .hero,
+  body[data-page] .enerkom-site-header,
+  body[data-page] .card {
+    border-radius: 10px;
+  }
+}

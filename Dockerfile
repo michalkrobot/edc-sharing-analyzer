@@ -52,6 +52,8 @@ COPY index.html \
      backtest.html \
      multi-ean-analyzer.js \
      multi-ean-analyzer.css \
+    fluent-pages.css \
+    fluent-pages.js \
      allocation-planner.js \
      backtest.js \
      auth-client.js \

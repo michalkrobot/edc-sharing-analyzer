@@ -8,6 +8,8 @@ public static class AllocationPlannerEndpoints
     public static IEndpointRouteBuilder MapAllocationPlannerEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/admin/planner/eans", GetEansAsync);
+        app.MapGet("/api/admin/planner/groups", GetGroupsAsync);
+        app.MapPut("/api/admin/planner/groups/{groupId:int}/edc-id", SetGroupEdcIdAsync);
         app.MapPost("/api/admin/planner/synthetic-eans", UpsertSyntheticEanAsync);
         app.MapDelete("/api/admin/planner/synthetic-eans/{ean}", DeleteSyntheticEanAsync);
         app.MapGet("/api/admin/planner/priority-links", GetPriorityLinksAsync);
@@ -17,6 +19,22 @@ public static class AllocationPlannerEndpoints
     }
 
     private static async Task<IResult> GetEansAsync(
+        HttpContext context, IAppService service, string? tenantId, int? groupId, CancellationToken cancellationToken)
+    {
+        var auth = context.GetAuthPrincipal();
+        if (auth is null) return Results.Unauthorized();
+        if (auth.Role != AuthConstants.RoleGlobalAdmin && auth.Role != AuthConstants.RoleTenantAdmin)
+            return Results.Forbid();
+        try
+        {
+            var id = await ResolveTenantIdAsync(service, auth, tenantId, cancellationToken);
+            var eans = await service.GetPlannerEansAsync(id, groupId, cancellationToken);
+            return Results.Ok(eans);
+        }
+        catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    private static async Task<IResult> GetGroupsAsync(
         HttpContext context, IAppService service, string? tenantId, CancellationToken cancellationToken)
     {
         var auth = context.GetAuthPrincipal();
@@ -26,14 +44,14 @@ public static class AllocationPlannerEndpoints
         try
         {
             var id = await ResolveTenantIdAsync(service, auth, tenantId, cancellationToken);
-            var eans = await service.GetPlannerEansAsync(id, cancellationToken);
-            return Results.Ok(eans);
+            var groups = await service.GetPlannerGroupsAsync(id, cancellationToken);
+            return Results.Ok(groups);
         }
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     }
 
-    private static async Task<IResult> UpsertSyntheticEanAsync(
-        HttpContext context, UpsertSyntheticEanRequest body, IAppService service, string? tenantId, CancellationToken cancellationToken)
+    private static async Task<IResult> SetGroupEdcIdAsync(
+        int groupId, HttpContext context, SetGroupEdcIdRequest body, IAppService service, string? tenantId, CancellationToken cancellationToken)
     {
         var auth = context.GetAuthPrincipal();
         if (auth is null) return Results.Unauthorized();
@@ -42,7 +60,23 @@ public static class AllocationPlannerEndpoints
         try
         {
             var id = await ResolveTenantIdAsync(service, auth, tenantId, cancellationToken);
-            await service.UpsertSyntheticEanAsync(id, body, cancellationToken);
+            await service.SetSharingGroupEdcIdAsync(id, groupId, body?.EdcGroupId, cancellationToken);
+            return Results.Ok();
+        }
+        catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    private static async Task<IResult> UpsertSyntheticEanAsync(
+        HttpContext context, UpsertSyntheticEanRequest body, IAppService service, string? tenantId, int? groupId, CancellationToken cancellationToken)
+    {
+        var auth = context.GetAuthPrincipal();
+        if (auth is null) return Results.Unauthorized();
+        if (auth.Role != AuthConstants.RoleGlobalAdmin && auth.Role != AuthConstants.RoleTenantAdmin)
+            return Results.Forbid();
+        try
+        {
+            var id = await ResolveTenantIdAsync(service, auth, tenantId, cancellationToken);
+            await service.UpsertSyntheticEanAsync(id, body, groupId, cancellationToken);
             return Results.Ok();
         }
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }

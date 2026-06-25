@@ -44,7 +44,7 @@ public static class SimulationEndpoints
                 tenantId = (int)(tenant.GetType().GetProperty("id")?.GetValue(tenant) ?? 0);
             }
 
-            var simData = await service.BuildSimDataAsync(tenantId, body.DateFrom, body.DateTo, cancellationToken);
+            var simData = await service.BuildSimDataAsync(tenantId, body.DateFrom, body.DateTo, body.PlannerGroupId, cancellationToken);
             var jobId = simulationService.StartJob(simData, body);
             return Results.Ok(new { jobId });
         }

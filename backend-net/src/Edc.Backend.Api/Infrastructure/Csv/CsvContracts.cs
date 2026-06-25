@@ -1,7 +1,19 @@
 namespace Edc.Backend.Api.Infrastructure.Csv;
 
 public sealed record ParsedMemberRow(string Email, string FullName, string Typ, string Mesto);
-public sealed record ParsedEanRow(string Ean, string Label, string MemberName, bool IsPublic, string NormalizedMemberName);
+public sealed record ParsedEanRow(
+    string Ean,
+    string Label,
+    string MemberName,
+    bool IsPublic,
+    string NormalizedMemberName,
+    string CurrentGroup,
+    string PlannedGroup,
+    bool? IsProducer,
+    string SourceType,
+    double? InstalledKw,
+    double? ExpectedKw,
+    double? AnnualKwh);
 public sealed record EdcProducer(string Name, int CsvIndex);
 public sealed record EdcConsumer(string Name, int CsvIndex);
 public sealed record EdcIntervalProducer(double Before, double After, double Missed);

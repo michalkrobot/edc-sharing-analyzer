@@ -64,6 +64,26 @@ public sealed class TenantEan
     public string MemberName { get; set; } = string.Empty;
     public int IsPublic { get; set; }
     public long ImportedAt { get; set; }
+
+    // Plánovací atributy z eany.csv (volitelné – null, pokud sloupce v souboru chybí)
+    public string? CurrentGroupName { get; set; }   // sloupec "skupina" – kde EAN aktuálně je v EDC datech
+    public string? PlannedGroupName { get; set; }    // sloupec "skupina - planovana" – cílová skupina pro příští měsíc (používá planner)
+    public bool? IsProducer { get; set; }            // "typ": Výrobní = true, Spotřební = false
+    public string? SourceType { get; set; }          // "typ zdroje", např. "FVE (fotovoltaika)"
+    public double? InstalledKw { get; set; }         // "instalovany vykon" v kWp – seed pro odhad výroby
+    public double? ExpectedKw { get; set; }           // "predpokladany vykon"
+    public double? AnnualKwh { get; set; }            // "rocni spotreba elektricke energie v kWh" – seed pro odhad spotřeby
+}
+
+// Skupina sdílení v rámci tenanta. Název pochází z eany.csv ("skupina" / "skupina - planovana"),
+// EdcGroupId (portálové IdSkupinySdileni) se přiřadí v administraci při párování s EDC daty.
+public sealed class SharingGroup
+{
+    public int Id { get; set; }
+    public int TenantId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? EdcGroupId { get; set; }
+    public long CreatedAt { get; set; }
 }
 
 public sealed class TenantEdcImport
@@ -124,6 +144,7 @@ public sealed class SyntheticEan
     public double? AnnualKwh { get; set; }      // Odběratel: roční spotřeba v kWh
     public string TdzCategory { get; set; } = string.Empty; // "fve" | "domacnost" | "mala_firma" | "stredni_firma" | "velka_firma"
     public long CreatedAt { get; set; }
+    public int? SharingGroupId { get; set; }   // ruční EAN je navázán na konkrétní skupinu sdílení (null = legacy, per tenant)
 }
 
 // Manuální priority link – výrobna preferenčně dodává konkrétnímu odběrateli

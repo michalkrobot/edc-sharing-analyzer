@@ -2,6 +2,8 @@
 
 // ── State ────────────────────────────────────────────────────────────────────
 let currentTenantId = null;
+let currentGroupId = null;
+let plannerGroups = [];
 let plannerEans = [];
 let priorityLinks = [];
 let lastSimResult = null;
@@ -39,7 +41,11 @@ function show(id) { const el = qs(id); if (el) el.style.display = ""; }
 function hide(id) { const el = qs(id); if (el) el.style.display = "none"; }
 
 function tenantParam() {
-  return currentTenantId ? `?tenantId=${encodeURIComponent(currentTenantId)}` : "";
+  const params = new URLSearchParams();
+  if (currentTenantId) params.set("tenantId", currentTenantId);
+  if (currentGroupId) params.set("groupId", currentGroupId);
+  const s = params.toString();
+  return s ? `?${s}` : "";
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
@@ -79,18 +85,92 @@ function init() {
     const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     qs("monthPicker").value = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
 
+    show("groupSection");
     show("monthSection");
     show("addSyntheticSection");
     show("priorityLinksSection");
     show("simulationSection");
 
+    setupGroupPicker();
     setupSyntheticForm();
     setupPriorityLinkForm();
     setupSimulation();
 
+    loadGroups();
+  }, 100);
+}
+
+// ── Sharing groups ─────────────────────────────────────────────────────────────
+async function loadGroups() {
+  try {
+    plannerGroups = await apiFetch(`/api/admin/planner/groups${tenantParam()}`);
+  } catch (e) {
+    console.error("loadGroups", e);
+    plannerGroups = [];
+  }
+
+  const sel = qs("groupPicker");
+  if (!plannerGroups.length) {
+    sel.innerHTML = '<option value="">— žádné skupiny (naimportujte eany.csv) —</option>';
+    currentGroupId = null;
+    qs("groupChip").textContent = "0 skupin";
+    setStatus("groupStatus", "Pro tenanta nejsou žádné skupiny. Naimportujte eany.csv se sloupcem \"skupina - planovana\".", true);
+    renderGroupEdcId();
+    return;
+  }
+
+  sel.innerHTML = plannerGroups
+    .map(g => `<option value="${g.id}">${esc(g.name)} (${g.memberCount} EAN)</option>`)
+    .join("");
+  qs("groupChip").textContent = `${plannerGroups.length} skupin`;
+
+  // Preserve current selection if still present, else first group
+  if (!currentGroupId || !plannerGroups.some(g => String(g.id) === String(currentGroupId))) {
+    currentGroupId = String(plannerGroups[0].id);
+  }
+  sel.value = currentGroupId;
+
+  renderGroupEdcId();
+  setStatus("groupStatus", "");
+  loadEans();
+  loadPriorityLinks();
+}
+
+function currentGroup() {
+  return plannerGroups.find(g => String(g.id) === String(currentGroupId)) || null;
+}
+
+function renderGroupEdcId() {
+  const g = currentGroup();
+  qs("groupEdcId").value = g && g.edcGroupId ? g.edcGroupId : "";
+}
+
+function setupGroupPicker() {
+  qs("groupPicker").addEventListener("change", e => {
+    currentGroupId = e.target.value || null;
+    renderGroupEdcId();
+    setStatus("groupStatus", "");
+    hide("resultsSection");
     loadEans();
     loadPriorityLinks();
-  }, 100);
+  });
+
+  qs("saveGroupEdcIdBtn").addEventListener("click", async () => {
+    if (!currentGroupId) return;
+    const edcGroupId = qs("groupEdcId").value.trim();
+    setStatus("groupStatus", "Ukládám…");
+    try {
+      await apiFetch(`/api/admin/planner/groups/${encodeURIComponent(currentGroupId)}/edc-id${tenantParam()}`, {
+        method: "PUT",
+        body: JSON.stringify({ edcGroupId: edcGroupId || null }),
+      });
+      const g = currentGroup();
+      if (g) g.edcGroupId = edcGroupId || null;
+      setStatus("groupStatus", "EDC ID uloženo ✓");
+    } catch (err) {
+      setStatus("groupStatus", err.message, true);
+    }
+  });
 }
 
 // ── EAN list ─────────────────────────────────────────────────────────────────
@@ -127,7 +207,7 @@ function renderEanTable(eans) {
           ? `<br><small style="color:var(--muted)">${e.installedKw ?? "?"} kWp · FVE model</small>`
           : `<small style="color:var(--muted)">${e.annualKwh ? (e.annualKwh / 1000).toFixed(1) + " MWh/rok" : "?"} · ${tdzLabel(e.tdzCategory)}</small>`)
       : "";
-    const delBtn = e.isSynthetic
+    const delBtn = e.isManual
       ? `<button onclick="deleteSyntheticEan('${esc(e.ean)}')" style="font-size:0.8em;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer;">✕</button>`
       : "";
     return `<tr>
@@ -319,6 +399,7 @@ async function runSimulation() {
   try {
     const body = {
       tenantId: currentTenantId,
+      plannerGroupId: currentGroupId ? Number(currentGroupId) : null,
       dateFrom,
       dateTo,
       mode: "optimize",
