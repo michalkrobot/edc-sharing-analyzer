@@ -32,6 +32,8 @@ public interface IAppService
     Task<object> SaveEdcLinkImportAsync(string csvText, string filename, AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
     Task<object> BuildMemberSharingDataAsync(int userId, int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
     Task<object> BuildTenantFullSharingDataAsync(int tenantId, long dateFrom, long dateTo, CancellationToken cancellationToken = default);
+    Task<string?> GetTenantSharingDataJsonAsync(int tenantId, CancellationToken cancellationToken = default);
+    Task<string?> RebuildTenantSharingCacheAsync(int tenantId, CancellationToken cancellationToken = default);
     Task<object> ResolveTenantScopeAsync(AuthPrincipal auth, string? requestedTenantId, CancellationToken cancellationToken = default);
     Task<object> ResolveGroupAccessAsync(AuthPrincipal auth, string? groupId, CancellationToken cancellationToken = default);
     Task<List<object>> ListTenantsWithAdminsAsync(CancellationToken cancellationToken = default);
@@ -301,6 +303,8 @@ public sealed class AppService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        // Zmenily se popisky/clenove – necht se predpocitany prehled prepocita pri pristim nacteni.
+        await InvalidateTenantSharingCacheAsync(tenant.Id, cancellationToken);
         return (imported, conflicts);
     }
 
@@ -433,6 +437,8 @@ public sealed class AppService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        // Zmenily se popisky EAN / skupiny – necht se predpocitany prehled prepocita pri pristim nacteni.
+        await InvalidateTenantSharingCacheAsync(tenant.Id, cancellationToken);
 
         var unmatchedOrdered = unmatched
             .OrderBy(x => x, StringComparer.Create(new CultureInfo("cs-CZ"), false))
@@ -496,6 +502,7 @@ public sealed class AppService(
 
         await db.SaveChangesAsync(cancellationToken);
         await BulkUpsertEdcIntervalsAsync(tenant.Id, parsed, cancellationToken);
+        await TryRebuildTenantSharingCacheAsync(tenant.Id, cancellationToken);
 
         var updated = await db.TenantEdcImports.AsNoTracking().FirstAsync(x => x.TenantId == tenant.Id, cancellationToken);
         return new
@@ -619,6 +626,7 @@ public sealed class AppService(
 
         await db.SaveChangesAsync(cancellationToken);
         await BulkUpsertEdcLinkIntervalsAsync(tenant.Id, parsed, cancellationToken);
+        await TryRebuildTenantSharingCacheAsync(tenant.Id, cancellationToken);
 
         var updated = await db.TenantEdcLinkImports.AsNoTracking().FirstAsync(x => x.TenantId == tenant.Id, cancellationToken);
         return new
@@ -779,18 +787,24 @@ public sealed class AppService(
             .OrderBy(g => g.Key)
             .Select(g =>
             {
+                // (tenant, ean, time_from) je unikatni, takze v ramci jednoho intervalu je
+                // kazdy EAN nejvyse jednou – staci jednoprůchodovy slovnik misto FirstOrDefault
+                // skenu pro kazdy EAN (drive O(intervaly × EANy × cteni_v_intervalu)).
+                var byEan = new Dictionary<string, EdcReading>(StringComparer.Ordinal);
+                foreach (var r in g) byEan[r.Ean] = r;
+
                 var producerData = producerEans.Select(ean =>
                 {
-                    var r = g.FirstOrDefault(x => x.Ean == ean && x.IsProducer);
-                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
-                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                    return byEan.TryGetValue(ean, out var r) && r.IsProducer
+                        ? new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed }
+                        : new { before = 0d, after = 0d, missed = 0d };
                 }).ToList();
 
                 var consumerData = consumerEans.Select(ean =>
                 {
-                    var r = g.FirstOrDefault(x => x.Ean == ean && !x.IsProducer);
-                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
-                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                    return byEan.TryGetValue(ean, out var r) && !r.IsProducer
+                        ? new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed }
+                        : new { before = 0d, after = 0d, missed = 0d };
                 }).ToList();
 
                 var sumProdBefore = producerData.Sum(x => x.before);
@@ -918,18 +932,24 @@ public sealed class AppService(
             .OrderBy(g => g.Key)
             .Select(g =>
             {
+                // (tenant, ean, time_from) je unikatni, takze v ramci jednoho intervalu je
+                // kazdy EAN nejvyse jednou – staci jednoprůchodovy slovnik misto FirstOrDefault
+                // skenu pro kazdy EAN (drive O(intervaly × EANy × cteni_v_intervalu)).
+                var byEan = new Dictionary<string, EdcReading>(StringComparer.Ordinal);
+                foreach (var r in g) byEan[r.Ean] = r;
+
                 var producerData = producerEans.Select(ean =>
                 {
-                    var r = g.FirstOrDefault(x => x.Ean == ean && x.IsProducer);
-                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
-                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                    return byEan.TryGetValue(ean, out var r) && r.IsProducer
+                        ? new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed }
+                        : new { before = 0d, after = 0d, missed = 0d };
                 }).ToList();
 
                 var consumerData = consumerEans.Select(ean =>
                 {
-                    var r = g.FirstOrDefault(x => x.Ean == ean && !x.IsProducer);
-                    return r is null ? new { before = 0d, after = 0d, missed = 0d }
-                        : new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed };
+                    return byEan.TryGetValue(ean, out var r) && !r.IsProducer
+                        ? new { before = r.KwhTotal, after = r.KwhRemainder, missed = r.KwhMissed }
+                        : new { before = 0d, after = 0d, missed = 0d };
                 }).ToList();
 
                 var sumProdBefore = producerData.Sum(x => x.before);
@@ -987,6 +1007,86 @@ public sealed class AppService(
             eanLabels,
             memberScope = (object?)null,
         };
+    }
+
+    // Vrati predpocitany JSON pro verejny prehled (uvodni stranka + embed enerkom-report).
+    // Pri cache miss dopocita a ulozi. Vraci null, pokud tenant nema zadna EDC data.
+    public async Task<string?> GetTenantSharingDataJsonAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        var cached = await db.TenantSharingCaches.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        if (cached is not null)
+            return cached.PayloadJson;
+
+        return await RebuildTenantSharingCacheAsync(tenantId, cancellationToken);
+    }
+
+    // Prepocita a ulozi predpocitany payload. Vraci serializovany JSON (nebo null, kdyz nejsou data).
+    public async Task<string?> RebuildTenantSharingCacheAsync(int tenantId, CancellationToken cancellationToken = default)
+    {
+        const long dateFrom = 0;
+        var dateTo = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds();
+
+        object payload;
+        try
+        {
+            payload = await BuildTenantFullSharingDataAsync(tenantId, dateFrom, dateTo, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // Tenant nema zadna EDC data – odstranime pripadny zastaraly zaznam.
+            await InvalidateTenantSharingCacheAsync(tenantId, cancellationToken);
+            return null;
+        }
+
+        var json = JsonSerializer.Serialize(payload, _jsonOptions);
+        var intervalCount = await db.EdcReadings.AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .Select(x => x.TimeFrom)
+            .Distinct()
+            .CountAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        var existing = await db.TenantSharingCaches.FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        if (existing is null)
+        {
+            db.TenantSharingCaches.Add(new TenantSharingCache
+            {
+                TenantId = tenantId,
+                PayloadJson = json,
+                IntervalCount = intervalCount,
+                ComputedAt = now,
+            });
+        }
+        else
+        {
+            existing.PayloadJson = json;
+            existing.IntervalCount = intervalCount;
+            existing.ComputedAt = now;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return json;
+    }
+
+    // Eager prepocet po importu – selhani prepoctu nesmi shodit import (cache se dopocita pri pristim nacteni).
+    private async Task TryRebuildTenantSharingCacheAsync(int tenantId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RebuildTenantSharingCacheAsync(tenantId, cancellationToken);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Cache je jen optimalizace; pri chybe se necha dopocitat lazy pri pristim verejnem dotazu.
+        }
+    }
+
+    private async Task InvalidateTenantSharingCacheAsync(int tenantId, CancellationToken cancellationToken)
+    {
+        await db.TenantSharingCaches
+            .Where(x => x.TenantId == tenantId)
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     public async Task<SimData> BuildSimDataAsync(int tenantId, long dateFrom, long dateTo, int? sharingGroupId = null, CancellationToken cancellationToken = default)

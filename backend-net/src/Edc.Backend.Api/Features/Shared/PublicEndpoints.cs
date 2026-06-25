@@ -18,14 +18,18 @@ public static class PublicEndpoints
             return Results.BadRequest(new { error = "Chybí nebo je neplatný parametr tenantId." });
         }
 
-        // Embed view always returns full tenant history.
-        const long dateFrom = 0;
-        var dateTo = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds();
-
+        // Uvodni stranka i embed (enerkom-report) vzdy zobrazuji celou historii tenanta.
+        // Payload se predpocita po importu, takze se zde jen vrati hotovy JSON z cache
+        // (pri cache miss se dopocita) – nedotazujeme velke tabulky pri kazdem nacteni.
         try
         {
-            var payload = await service.BuildTenantFullSharingDataAsync(tenantId, dateFrom, dateTo, cancellationToken);
-            return Results.Ok(payload);
+            var json = await service.GetTenantSharingDataJsonAsync(tenantId, cancellationToken);
+            if (json is null)
+            {
+                return Results.BadRequest(new { error = "Pro tuto skupinu sdileni nejsou v danem obdobi EDC data." });
+            }
+
+            return Results.Content(json, "application/json");
         }
         catch (InvalidOperationException ex)
         {

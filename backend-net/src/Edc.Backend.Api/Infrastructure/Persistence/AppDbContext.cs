@@ -21,6 +21,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<TenantEdcCredential> TenantEdcCredentials => Set<TenantEdcCredential>();
     public DbSet<EdcImportHistory> EdcImportHistories => Set<EdcImportHistory>();
     public DbSet<EdcScrapeJob> EdcScrapeJobs => Set<EdcScrapeJob>();
+    public DbSet<TenantSharingCache> TenantSharingCaches => Set<TenantSharingCache>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -198,5 +199,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         modelBuilder.Entity<EdcScrapeJob>().Property(x => x.UpdatedAt).HasColumnName("updated_at");
         modelBuilder.Entity<EdcScrapeJob>().Property(x => x.ClaimedAt).HasColumnName("claimed_at");
         modelBuilder.Entity<EdcScrapeJob>().Property(x => x.FinishedAt).HasColumnName("finished_at");
+
+        modelBuilder.Entity<TenantSharingCache>().ToTable("tenant_sharing_cache");
+        modelBuilder.Entity<TenantSharingCache>().HasKey(x => x.TenantId);
+        modelBuilder.Entity<TenantSharingCache>().Property(x => x.TenantId).HasColumnName("tenant_id").ValueGeneratedNever();
+        modelBuilder.Entity<TenantSharingCache>().Property(x => x.PayloadJson).HasColumnName("payload_json");
+        modelBuilder.Entity<TenantSharingCache>().Property(x => x.IntervalCount).HasColumnName("interval_count");
+        modelBuilder.Entity<TenantSharingCache>().Property(x => x.ComputedAt).HasColumnName("computed_at");
     }
 }
