@@ -512,7 +512,7 @@ function showError(msg) {
 // ── Data loading ──────────────────────────────────────────────────────────────
 async function loadData(tenantId) {
   const apiBase = String(window.EDC_AUTH_API_BASE || "/api").replace(/\/$/, "");
-  const resp = await fetch(`${apiBase}/public/tenant-sharing-data?tenantId=${encodeURIComponent(tenantId)}`);
+  const resp = await fetch(`${apiBase}/public/tenant-sharing-summary?tenantId=${encodeURIComponent(tenantId)}`);
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     throw new Error(body.error || `HTTP ${resp.status}`);
